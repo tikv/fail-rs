@@ -112,6 +112,10 @@ fn partition(s: &str, pattern: char) -> (&str, Option<&str>) {
 impl FromStr for Action {
     type Err = String;
 
+    /// Parse an action.
+    ///
+    /// `s` should be in the format `[p%][cnt*]task[(args)]`, `p%` is the frequency,
+    /// `cnt` is the max times the action can be triggered.
     fn from_str(s: &str) -> Result<Action, String> {
         let mut remain = s.trim();
         let mut args = None;
