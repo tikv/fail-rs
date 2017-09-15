@@ -176,14 +176,6 @@ impl FromStr for Action {
 // A better name?
 pub type ReturnValue = Option<String>;
 
-pub trait FromReturnStr {
-    fn from_return_str(from: ReturnValue) -> Self;
-}
-
-impl FromReturnStr for () {
-    fn from_return_str(_: ReturnValue) -> () {}
-}
-
 pub struct FailPoint {
     name: &'static str,
     pause: Mutex<bool>,
