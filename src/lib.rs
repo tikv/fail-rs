@@ -124,7 +124,7 @@ impl FromStr for Action {
         if let Some(second) = second {
             remain = first;
             if !second.ends_with(")") {
-                return Err(format!("parentheses not match in {:?}", s));
+                return Err("parentheses not match".to_owned());
             }
             args = Some(&second[..second.len() - 1]);
         }
@@ -134,7 +134,7 @@ impl FromStr for Action {
         if let Some(second) = second {
             remain = second;
             match first.parse::<f32>() {
-                Err(e) => return Err(format!("failed to parse frequency in {:?}: {}", s, e)),
+                Err(e) => return Err(format!("failed to parse frequency: {}", e)),
                 Ok(freq) => frequency = freq / 100.0,
             }
         }
@@ -144,7 +144,7 @@ impl FromStr for Action {
         if let Some(second) = second {
             remain = second;
             match first.parse() {
-                Err(e) => return Err(format!("failed to parse count in {:?}: {}", s, e)),
+                Err(e) => return Err(format!("failed to parse count: {}", e)),
                 Ok(cnt) => max_cnt = Some(cnt),
             }
         }
@@ -152,7 +152,7 @@ impl FromStr for Action {
         let parse_timeout = || match args {
             None => return Err("sleep require timeout".to_owned()),
             Some(timeout_str) => match timeout_str.parse() {
-                Err(e) => return Err(format!("failed to parse timeout in {:?}: {}", s, e)),
+                Err(e) => return Err(format!("failed to parse timeout: {}", e)),
                 Ok(timeout) => Ok(timeout),
             },
         };
@@ -166,7 +166,7 @@ impl FromStr for Action {
             "pause" => Task::Pause,
             "yield" => Task::Yield,
             "delay" => Task::Delay(try!(parse_timeout())),
-            _ => return Err(format!("unrecognized command {:?}", s)),
+            _ => return Err(format!("unrecognized command {:?}", remain)),
         };
 
         Ok(Action::new(task, frequency, max_cnt))
