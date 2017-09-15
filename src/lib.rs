@@ -13,12 +13,15 @@
 
 //! A failpoints implementation for rust.
 
+#[macro_use]
+extern crate lazy_static;
 extern crate rand;
 
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Condvar, Mutex, RwLock, TryLockError};
-use std::thread;
+use std::sync::{Arc, Condvar, Mutex, RwLock, TryLockError};
+use std::{env, thread};
 use std::time::{Duration, Instant};
 
 use rand::Closed01;
@@ -176,17 +179,15 @@ impl FromStr for Action {
 // A better name?
 pub type ReturnValue = Option<String>;
 
-pub struct FailPoint {
-    name: &'static str,
+struct FailPoint {
     pause: Mutex<bool>,
     pause_notifier: Condvar,
     actions: RwLock<Vec<Action>>,
 }
 
 impl FailPoint {
-    pub fn new(name: &'static str) -> FailPoint {
+    fn new() -> FailPoint {
         FailPoint {
-            name: name,
             pause: Mutex::new(false),
             pause_notifier: Condvar::new(),
             actions: RwLock::new(vec![]),
@@ -212,7 +213,7 @@ impl FailPoint {
         }
     }
 
-    pub fn eval(&self) -> Option<ReturnValue> {
+    fn eval(&self, name: &str) -> Option<ReturnValue> {
         let task = {
             let actions = self.actions.read().unwrap();
             match actions.iter().filter_map(|a| a.get_task()).next() {
@@ -238,11 +239,11 @@ impl FailPoint {
             Task::Sleep(t) => thread::sleep(Duration::from_millis(t)),
             Task::Panic(msg) => match msg {
                 Some(ref msg) => panic!("{}", msg),
-                None => panic!("failpoint {} panic", self.name),
+                None => panic!("failpoint {} panic", name),
             },
             Task::Print(msg) => match msg {
                 Some(ref msg) => println!("{}", msg),
-                None => println!("failpoint {} executed.", self.name),
+                None => println!("failpoint {} executed.", name),
             },
             Task::Pause => unreachable!(),
             Task::Yield => thread::yield_now(),
@@ -256,6 +257,72 @@ impl FailPoint {
     }
 }
 
+#[derive(Default)]
+struct FailPointRegistry {
+    // TODO: remove rwlock or store *mut FailPoint
+    registry: RwLock<HashMap<String, Arc<FailPoint>>>,
+}
+
+lazy_static! {
+    static ref REGISTRY: FailPointRegistry = FailPointRegistry::default();
+}
+
+pub fn init() {
+    let mut registry = REGISTRY.registry.write().unwrap();
+    let failpoints = env::var("FAILPOINTS").unwrap();
+    for cfg in failpoints.split(";") {
+        let (name, order) = partition(cfg, '=');
+        match order {
+            None => panic!("invalid failpoint: {:?}", cfg),
+            Some(order) => set(&mut registry, name.to_owned(), order).unwrap(),
+        }
+    }
+}
+
+pub fn reset() {
+    REGISTRY.registry.write().unwrap().clear();
+}
+
+pub fn eval<R, F: FnOnce(ReturnValue) -> R>(name: &str, f: F) -> Option<R> {
+    let p = {
+        let registry = REGISTRY.registry.read().unwrap();
+        match registry.get(name) {
+            None => return None,
+            Some(p) => p.clone(),
+        }
+    };
+    p.eval(name).map(f)
+}
+
+pub fn cfg<S: Into<String>>(name: S, orders: &str) -> Result<(), String> {
+    let mut registry = REGISTRY.registry.write().unwrap();
+    set(&mut registry, name.into(), orders)
+}
+
+fn set(registry: &mut HashMap<String, Arc<FailPoint>>, name: String, orders: &str) -> Result<(), String> {
+    let actions = try!(orders.split("->").map(Action::from_str).collect());
+    // Please note that we can't figure out whether there is a failpoint named `name`,
+    // so we may insert a failpoint that doesn't exist at all.
+    let p = registry.entry(name).or_insert_with(|| Arc::new(FailPoint::new()));
+    p.set_actions(actions);
+    Ok(())
+}
+
+#[macro_export]
+macro_rules! fail_point {
+    ($name:expr, $e:expr) => {{
+        let name = concat!(module_path!(), "::", $name);
+        if let Some(res) = $crate::eval(name, $e) {
+            return res;
+        }
+    }};
+    ($name:expr, $cond:expr, $e:expr) => {{
+        if $cond {
+            $crate::fail_point!($name, $e);
+        }
+    }};
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,56 +331,56 @@ mod tests {
 
     #[test]
     fn test_off() {
-        let point = FailPoint::new("test_fail_point_off");
+        let point = FailPoint::new();
         point.set_actions(vec![Action::new(Task::Off, 1.0, None)]);
-        assert!(point.eval().is_none());
+        assert!(point.eval("test_fail_point_off").is_none());
     }
 
     #[test]
     fn test_return() {
-        let point = FailPoint::new("test_fail_point_return");
+        let point = FailPoint::new();
         point.set_actions(vec![Action::new(Task::Return(None), 1.0, None)]);
-        let res = point.eval();
+        let res = point.eval("test_fail_point_return");
         assert_eq!(res, Some(None));
 
         let ret = Some("test".to_owned());
         point.set_actions(vec![Action::new(Task::Return(ret.clone()), 1.0, None)]);
-        let res = point.eval();
+        let res = point.eval("test_fail_point_return");
         assert_eq!(res, Some(ret));
     }
 
     #[test]
     fn test_sleep() {
-        let point = FailPoint::new("test_fail_point_sleep");
+        let point = FailPoint::new();
         let timer = Instant::now();
         point.set_actions(vec![Action::new(Task::Sleep(1000), 1.0, None)]);
-        assert!(point.eval().is_none());
+        assert!(point.eval("test_fail_point_sleep").is_none());
         assert!(timer.elapsed() > Duration::from_millis(1000));
     }
 
     #[should_panic]
     #[test]
     fn test_panic() {
-        let point = FailPoint::new("test_fail_point_panic");
+        let point = FailPoint::new();
         point.set_actions(vec![Action::new(Task::Panic(None), 1.0, None)]);
-        point.eval();
+        point.eval("test_fail_point_panic");
     }
 
     #[test]
     fn test_print() {
-        let point = FailPoint::new("test_fail_point_print");
+        let point = FailPoint::new();
         point.set_actions(vec![Action::new(Task::Print(None), 1.0, None)]);
-        assert!(point.eval().is_none());
+        assert!(point.eval("test_fail_point_print").is_none());
     }
 
     #[test]
     fn test_pause() {
-        let point = Arc::new(FailPoint::new("test_fail_point_pause"));
+        let point = Arc::new(FailPoint::new());
         point.set_actions(vec![Action::new(Task::Pause, 1.0, None)]);
         let p = point.clone();
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            assert_eq!(p.eval(), None);
+            assert_eq!(p.eval("test_fail_point_pause"), None);
             tx.send(()).unwrap();
         });
         assert!(rx.recv_timeout(Duration::from_secs(1)).is_err());
@@ -323,35 +390,35 @@ mod tests {
 
     #[test]
     fn test_yield() {
-        let point = FailPoint::new("test_fail_point_yield");
+        let point = FailPoint::new();
         point.set_actions(vec![Action::new(Task::Yield, 1.0, None)]);
-        assert!(point.eval().is_none());
+        assert!(point.eval("test_fail_point_yield").is_none());
     }
 
     #[test]
     fn test_delay() {
-        let point = FailPoint::new("test_fail_point_delay");
+        let point = FailPoint::new();
         let timer = Instant::now();
         point.set_actions(vec![Action::new(Task::Delay(1000), 1.0, None)]);
-        assert!(point.eval().is_none());
+        assert!(point.eval("test_fail_point_delay").is_none());
         assert!(timer.elapsed() > Duration::from_millis(1000));
     }
 
     #[test]
     fn test_frequency_and_count() {
-        let point = FailPoint::new("test_fail_point_frequency");
+        let point = FailPoint::new();
         point.set_actions(vec![Action::new(Task::Return(None), 0.8, Some(100))]);
         let mut count = 0;
         let mut times = 0f64;
         while count < 100 {
-            if point.eval().is_some() {
+            if point.eval("test_fail_point_frequency").is_some() {
                 count += 1;
             }
             times += 1f64;
         }
         assert!(100.0 / 0.9 < times && times < 100.0 / 0.7, "{}", times);
         for _ in 0..times as u64 {
-            assert!(point.eval().is_none());
+            assert!(point.eval("test_fail_point_frequency").is_none());
         }
     }
 

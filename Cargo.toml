@@ -12,4 +12,5 @@ description = "Failpoints for rust."
 categories = ["development-tools::testing"]
 
 [dependencies]
+lazy_static = "0.2"
 rand = "0.3"
