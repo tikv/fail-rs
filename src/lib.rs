@@ -286,7 +286,7 @@ pub fn setup() {
 pub fn teardown() {
     let mut registry = REGISTRY.registry.write().unwrap();
     for (_, p) in &*registry {
-        // awake all pause failpoint.
+        // wake up all pause failpoint.
         p.set_actions(vec![]);
     }
     registry.clear();
@@ -311,6 +311,7 @@ pub fn cfg<S: Into<String>>(name: S, orders: &str) -> Result<(), String> {
 pub fn remove<S: AsRef<str>>(name: S) {
     let mut registry = REGISTRY.registry.write().unwrap();
     if let Some(p) = registry.remove(name.as_ref()) {
+        // wake up all pause failpoint.
         p.set_actions(vec![]);
     }
 }
@@ -504,7 +505,7 @@ mod tests {
         }
     }
 
-    // This case should be tested as integration case, but when calling `shutdown` other cases
+    // This case should be tested as integration case, but when calling `teardown` other cases
     // like `test_pause` maybe also affected, so it's better keep it here.
     #[test]
     fn test_setup_and_teardown() {
