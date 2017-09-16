@@ -267,10 +267,14 @@ lazy_static! {
     static ref REGISTRY: FailPointRegistry = FailPointRegistry::default();
 }
 
-pub fn init() {
+pub fn setup() {
     let mut registry = REGISTRY.registry.write().unwrap();
     let failpoints = env::var("FAILPOINTS").unwrap();
-    for cfg in failpoints.split(";") {
+    for mut cfg in failpoints.trim().split(";") {
+        cfg = cfg.trim();
+        if cfg.trim().is_empty() {
+            continue;
+        }
         let (name, order) = partition(cfg, '=');
         match order {
             None => panic!("invalid failpoint: {:?}", cfg),
@@ -279,8 +283,13 @@ pub fn init() {
     }
 }
 
-pub fn reset() {
-    REGISTRY.registry.write().unwrap().clear();
+pub fn teardown() {
+    let mut registry = REGISTRY.registry.write().unwrap();
+    for (_, p) in &*registry {
+        // awake all pause failpoint.
+        p.set_actions(vec![]);
+    }
+    registry.clear();
 }
 
 pub fn eval<R, F: FnOnce(ReturnValue) -> R>(name: &str, f: F) -> Option<R> {
@@ -297,6 +306,13 @@ pub fn eval<R, F: FnOnce(ReturnValue) -> R>(name: &str, f: F) -> Option<R> {
 pub fn cfg<S: Into<String>>(name: S, orders: &str) -> Result<(), String> {
     let mut registry = REGISTRY.registry.write().unwrap();
     set(&mut registry, name.into(), orders)
+}
+
+pub fn remove<S: AsRef<str>>(name: S) {
+    let mut registry = REGISTRY.registry.write().unwrap();
+    if let Some(p) = registry.remove(name.as_ref()) {
+        p.set_actions(vec![]);
+    }
 }
 
 fn set(registry: &mut HashMap<String, Arc<FailPoint>>, name: String, orders: &str) -> Result<(), String> {
@@ -316,9 +332,12 @@ macro_rules! fail_point {
             return res;
         }
     }};
+    ($name:expr) => {{
+        fail_point!($name, |_| {});
+    }};
     ($name:expr, $cond:expr, $e:expr) => {{
         if $cond {
-            $crate::fail_point!($name, $e);
+            fail_point!($name, $e);
         }
     }};
 }
@@ -477,5 +496,32 @@ mod tests {
         for case in fail_cases {
             assert!(case.parse::<Action>().is_err());
         }
+    }
+
+    // This case should be tested as integration case, but when calling `shutdown` other cases
+    // like `test_pause` maybe also affected, so it's better keep it here.
+    #[test]
+    fn test_setup_and_teardown() {
+        let f1 = || {
+            fail_point!("setup_and_teardown1", |_| 1);
+            0
+        };
+        let f2 = || {
+            fail_point!("setup_and_teardown2", |_| 2);
+            0
+        };
+        env::set_var("FAILPOINTS", "fail::tests::setup_and_teardown1=return;fail::tests::setup_and_teardown2=pause;");
+        setup();
+        assert_eq!(f1(), 1);
+        
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            tx.send(f2()).unwrap();
+        });
+        assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
+
+        teardown();
+        assert_eq!(rx.recv_timeout(Duration::from_millis(500)).unwrap(), 0);
+        assert_eq!(f1(), 0);
     }
 }

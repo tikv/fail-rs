@@ -18,61 +18,142 @@ use std::sync::mpsc;
 use std::time::*;
 use std::*;
 
-fn test() -> i32 {
-    fail_point!("test", |s: Option<String>| s.map_or(2, |s| s.parse().unwrap()));
-    0
+#[test]
+fn test_off() {
+    let f = || {
+        fail_point!("off", |_| 2);
+        0
+    };
+    assert_eq!(f(), 0);
+
+    fail::cfg("tests::off", "off").unwrap();
+    assert_eq!(f(), 0);
 }
 
-// To avoid race, test them all in one function.
 #[test]
-fn test_macro() {
-    assert_eq!(test(), 0);
+fn test_return() {
+    let f = || {
+        fail_point!("return", |s: Option<String>| s.map_or(2, |s| s.parse().unwrap()));
+        0
+    };
+    assert_eq!(f(), 0);
 
-    fail::cfg("tests::test", "off").unwrap();
-    assert_eq!(test(), 0);
+    fail::cfg("tests::return", "return(1000)").unwrap();
+    assert_eq!(f(), 1000);
 
-    fail::cfg("tests::test", "return(1000)").unwrap();
-    assert_eq!(test(), 1000);
+    fail::cfg("tests::return", "return").unwrap();
+    assert_eq!(f(), 2);
+}
+
+#[test]
+fn test_sleep() {
+    let f = || {
+        fail_point!("sleep");
+    };
+    let timer = Instant::now();
+    f();
+    assert!(timer.elapsed() < Duration::from_millis(1000));
 
     let timer = Instant::now();
-    fail::cfg("tests::test", "sleep(1000)").unwrap();
-    assert_eq!(test(), 0);
+    fail::cfg("tests::sleep", "sleep(1000)").unwrap();
+    f();
     assert!(timer.elapsed() > Duration::from_millis(1000));
+}
 
-    fail::cfg("tests::test", "panic(msg)").unwrap();
-    panic::catch_unwind(move || {
-        test()
-    }).unwrap_err();
+#[test]
+#[should_panic]
+fn test_panic() {
+    let f = || {
+        fail_point!("panic");
+    };
+    fail::cfg("tests::panic", "panic(msg)").unwrap();
+    f()
+}
 
-    fail::cfg("tests::test", "print(msg)").unwrap();
-    assert_eq!(test(), 0);
+#[test]
+fn test_print() {
+    let f = || {
+        fail_point!("print");
+    };
+    fail::cfg("tests::print", "print(msg)").unwrap();
+    // TODO: checkout output.
+    f();
+}
 
-    fail::cfg("tests::test", "pause").unwrap();
+#[test]
+fn test_pause() {
+    let f = || {
+        fail_point!("pause");
+    };
+    f();
+
+    fail::cfg("tests::pause", "pause").unwrap();
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        let val = test();
-        tx.send(val).unwrap();
+        // pause
+        tx.send(f()).unwrap();
+        // woken up by new order pause, and then pause again.
+        tx.send(f()).unwrap();
+        // woken up by remove, and then quit immediately.
+        tx.send(f()).unwrap();
     });
+    
     assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
-    fail::cfg("tests::test", "off").unwrap();
-    assert_eq!(rx.recv_timeout(Duration::from_millis(500)).unwrap(), 0);
+    fail::cfg("tests::pause", "pause").unwrap();
+    rx.recv_timeout(Duration::from_millis(500)).unwrap();
 
-    fail::cfg("tests::test", "yield").unwrap();
-    assert_eq!(test(), 0);
+    assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
+    fail::remove("tests::pause");
+    rx.recv_timeout(Duration::from_millis(500)).unwrap();
 
-    let timer = Instant::now();
-    fail::cfg("tests::test", "delay(1000)").unwrap();
-    assert_eq!(test(), 0);
-    assert!(timer.elapsed() > Duration::from_millis(1000));
-
-    fail::cfg("tests::test", "50%50*return(1)->50*return(-1)").unwrap();
-    let mut sum = 0;
-    for _ in 0..5000 {
-        let res = test();
-        assert!(res == 1 || res == -1 || res == 0);
-        sum += res;
-    }
-    assert!(-2 < sum && sum < 2, "sum is expect between -2 and 2, but got {}", sum);
+    rx.recv_timeout(Duration::from_millis(500)).unwrap();
 }
 
+#[test]
+fn test_yield() {
+    let f = || {
+        fail_point!("yield");
+    };
+    fail::cfg("tests::test", "yield").unwrap();
+    f();
+}
 
+#[test]
+fn test_delay() {
+    let f = || {
+        fail_point!("delay")
+    };
+    let timer = Instant::now();
+    fail::cfg("tests::delay", "delay(1000)").unwrap();
+    f();
+    assert!(timer.elapsed() > Duration::from_millis(1000));
+}
+
+#[test]
+fn test_freq_and_count() {
+    let f = || {
+        fail_point!("freq_and_count", |s: Option<String>| s.map_or(2, |s| s.parse().unwrap()));
+        0
+    };
+    fail::cfg("tests::freq_and_count", "50%50*return(1)->50%50*return(-1)->50*return").unwrap();
+    let mut sum = 0;
+    for _ in 0..5000 {
+        let res = f();
+        sum += res;
+    }
+    assert_eq!(sum, 100);
+}
+
+#[test]
+fn test_condition() {
+    let f = |enabled| {
+        fail_point!("condition", enabled, |_| 2);
+        0
+    };
+    assert_eq!(f(false), 0);
+
+    fail::cfg("tests::condition", "return").unwrap();
+    assert_eq!(f(false), 0);
+
+    assert_eq!(f(true), 2);
+}
