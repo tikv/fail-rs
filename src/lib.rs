@@ -315,11 +315,17 @@ pub fn remove<S: AsRef<str>>(name: S) {
     }
 }
 
-fn set(registry: &mut HashMap<String, Arc<FailPoint>>, name: String, orders: &str) -> Result<(), String> {
+fn set(
+    registry: &mut HashMap<String, Arc<FailPoint>>,
+    name: String,
+    orders: &str,
+) -> Result<(), String> {
     let actions = try!(orders.split("->").map(Action::from_str).collect());
     // Please note that we can't figure out whether there is a failpoint named `name`,
     // so we may insert a failpoint that doesn't exist at all.
-    let p = registry.entry(name).or_insert_with(|| Arc::new(FailPoint::new()));
+    let p = registry
+        .entry(name)
+        .or_insert_with(|| Arc::new(FailPoint::new()));
     p.set_actions(actions);
     Ok(())
 }
@@ -510,14 +516,15 @@ mod tests {
             fail_point!("setup_and_teardown2", |_| 2);
             0
         };
-        env::set_var("FAILPOINTS", "fail::tests::setup_and_teardown1=return;fail::tests::setup_and_teardown2=pause;");
+        env::set_var(
+            "FAILPOINTS",
+            "fail::tests::setup_and_teardown1=return;fail::tests::setup_and_teardown2=pause;",
+        );
         setup();
         assert_eq!(f1(), 1);
-        
+
         let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            tx.send(f2()).unwrap();
-        });
+        thread::spawn(move || { tx.send(f2()).unwrap(); });
         assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
 
         teardown();

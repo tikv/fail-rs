@@ -33,7 +33,9 @@ fn test_off() {
 #[test]
 fn test_return() {
     let f = || {
-        fail_point!("return", |s: Option<String>| s.map_or(2, |s| s.parse().unwrap()));
+        fail_point!("return", |s: Option<String>| {
+            s.map_or(2, |s| s.parse().unwrap())
+        });
         0
     };
     assert_eq!(f(), 0);
@@ -97,7 +99,7 @@ fn test_pause() {
         // woken up by remove, and then quit immediately.
         tx.send(f()).unwrap();
     });
-    
+
     assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
     fail::cfg("tests::pause", "pause").unwrap();
     rx.recv_timeout(Duration::from_millis(500)).unwrap();
@@ -120,9 +122,7 @@ fn test_yield() {
 
 #[test]
 fn test_delay() {
-    let f = || {
-        fail_point!("delay")
-    };
+    let f = || fail_point!("delay");
     let timer = Instant::now();
     fail::cfg("tests::delay", "delay(1000)").unwrap();
     f();
@@ -132,10 +132,15 @@ fn test_delay() {
 #[test]
 fn test_freq_and_count() {
     let f = || {
-        fail_point!("freq_and_count", |s: Option<String>| s.map_or(2, |s| s.parse().unwrap()));
+        fail_point!("freq_and_count", |s: Option<String>| {
+            s.map_or(2, |s| s.parse().unwrap())
+        });
         0
     };
-    fail::cfg("tests::freq_and_count", "50%50*return(1)->50%50*return(-1)->50*return").unwrap();
+    fail::cfg(
+        "tests::freq_and_count",
+        "50%50*return(1)->50%50*return(-1)->50*return",
+    ).unwrap();
     let mut sum = 0;
     for _ in 0..5000 {
         let res = f();
