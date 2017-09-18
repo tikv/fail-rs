@@ -292,6 +292,7 @@ pub fn teardown() {
     registry.clear();
 }
 
+#[doc(hidden)]
 pub fn eval<R, F: FnOnce(ReturnValue) -> R>(name: &str, f: F) -> Option<R> {
     let p = {
         let registry = REGISTRY.registry.read().unwrap();
@@ -303,9 +304,9 @@ pub fn eval<R, F: FnOnce(ReturnValue) -> R>(name: &str, f: F) -> Option<R> {
     p.eval(name).map(f)
 }
 
-pub fn cfg<S: Into<String>>(name: S, orders: &str) -> Result<(), String> {
+pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
     let mut registry = REGISTRY.registry.write().unwrap();
-    set(&mut registry, name.into(), orders)
+    set(&mut registry, name.into(), actions)
 }
 
 pub fn remove<S: AsRef<str>>(name: S) {
@@ -319,10 +320,10 @@ pub fn remove<S: AsRef<str>>(name: S) {
 fn set(
     registry: &mut HashMap<String, Arc<FailPoint>>,
     name: String,
-    orders: &str,
+    actions: &str,
 ) -> Result<(), String> {
-    // `orders` are in the format of `failpoint[->failpoint...]`.
-    let actions = try!(orders.split("->").map(Action::from_str).collect());
+    // `actions` are in the format of `failpoint[->failpoint...]`.
+    let actions = try!(actions.split("->").map(Action::from_str).collect());
     // Please note that we can't figure out whether there is a failpoint named `name`,
     // so we may insert a failpoint that doesn't exist at all.
     let p = registry
