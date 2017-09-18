@@ -321,6 +321,7 @@ fn set(
     name: String,
     orders: &str,
 ) -> Result<(), String> {
+    // `orders` are in the format of `failpoint[->failpoint...]`.
     let actions = try!(orders.split("->").map(Action::from_str).collect());
     // Please note that we can't figure out whether there is a failpoint named `name`,
     // so we may insert a failpoint that doesn't exist at all.
