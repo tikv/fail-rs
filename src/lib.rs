@@ -14,7 +14,7 @@
 //! A fail points implementation for rust.
 //!
 //! Fail points are code points that used to inject error by user at runtime.
-//! This crate is inspired by FreeBSD's [failpoints](freebsd.org/cgi/man.cgi?query=fail).
+//! This crate is inspired by FreeBSD's [failpoints](https://freebsd.org/cgi/man.cgi?query=fail).
 //! Unlike FreeBSD's implementation, this crate only support configuration from
 //! environment variables and API.
 //!
@@ -312,6 +312,7 @@ lazy_static! {
 ///
 /// The environment variable `FAILPOINTS` will be used to configure fail points.
 /// `FAILPOINTS` should be in the format of `full_path_to_failpoint=actions;...`.
+///
 /// `full_path_to_failpoint` is the full module path to the fail point plus its name.
 /// For more informations, please see macro [`fail_point`](macro.fail_point.html) and
 /// [`cfg`](fn.cfg.html).
@@ -368,18 +369,20 @@ pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
 /// Action should be in the format `[p%][cnt*]task[(arg)]`. `p%` is the expected probability
 /// action is triggered, `cnt*` is the max times the action can be triggered. Supported `task`
 /// includes:
-/// - off, the fail point will do nothing.
-/// - return(arg), return early when the fail point is triggered. `arg` is passed to `$e` (define
-/// via fail_point! macro) as string.
-/// - sleep(milliseconds), sleep for the specified time.
-/// - panic(msg), panic with the message.
-/// - print(msg), print the message.
-/// - pause, sleep until other action is set to the fail point.
-/// - yield, yield the CPU.
-/// - delay(milliseconds), busy waiting for the specified time.
 ///
-/// For example, `20%3*panic->print(still alive!)` means the fail point has 20% chance to panic
-/// and 80% chance to print a message "still alive!".
+/// - `off`, the fail point will do nothing.
+/// - `return(arg)`, return early when the fail point is triggered. `arg` is passed to `$e` (define
+/// via `fail_point!` macro) as string.
+/// - `sleep(milliseconds)`, sleep for the specified time.
+/// - `panic(msg)`, panic with the message.
+/// - `print(msg)`, print the message.
+/// - `pause`, sleep until other action is set to the fail point.
+/// - `yield`, yield the CPU.
+/// - `delay(milliseconds)`, busy waiting for the specified time.
+///
+/// For example, `20%3*print(still alive!)->panic` means the fail point has 20% chance to print a
+/// message "still alive!" and 80% chance to panic. And the message will be printed at most 3
+/// times.
 pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
     let mut registry = REGISTRY.registry.write().unwrap();
     set(&mut registry, name.into(), actions)
@@ -417,6 +420,7 @@ fn set(
 /// When a fail point is defined, it's reference via the full module path and name in the
 /// format of `crate::module::submodule::fail_point_name`. For example, library A defines
 /// a fail point in lib.rs as follow:
+///
 /// ```rust
 /// pub fn f() {
 ///     fail_point!("p1");
