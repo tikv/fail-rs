@@ -334,6 +334,7 @@ fn set(
 }
 
 #[macro_export]
+#[cfg(not(feature = "disabled"))]
 macro_rules! fail_point {
     ($name:expr, $e:expr) => {{
         let name = concat!(module_path!(), "::", $name);
@@ -349,6 +350,14 @@ macro_rules! fail_point {
             fail_point!($name, $e);
         }
     }};
+}
+
+#[macro_export]
+#[cfg(feature = "disabled")]
+macro_rules! fail_point {
+    ($name:expr, $e:expr) => {{}};
+    ($name:expr) => {{}};
+    ($name:expr, $cond:expr, $e:expr) => {{}};
 }
 
 #[cfg(test)]
