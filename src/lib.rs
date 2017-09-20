@@ -420,6 +420,9 @@ fn set(
 /// a fail point in lib.rs as follows:
 ///
 /// ```rust
+/// # #[macro_use]
+/// # extern crate fail;
+///
 /// pub fn f() {
 ///     fail_point!("p1");
 /// }
@@ -429,6 +432,7 @@ fn set(
 ///         fail_point!("p2");
 ///     }
 /// }
+/// # fn main() {}
 /// ```
 /// The full name of the `p1` fail point is `A::p1`, and `p2` is `A::M::p2`.
 ///
