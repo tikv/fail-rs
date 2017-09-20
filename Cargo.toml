@@ -16,4 +16,4 @@ lazy_static = "0.2"
 rand = "0.3"
 
 [features]
-disabled = []
+dormancy = []
