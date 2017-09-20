@@ -1,6 +1,9 @@
 # fail-rs
 
-A fail points implementation for rust.
+A fail point implementation for Rust.
+
+Fail point is a code point that are used to inject errors by users at runtime.
+This crate is inspired by FreeBSD's [failpoints](https://freebsd.org/cgi/man.cgi?query=fail).
 
 ## Usage
 
@@ -11,14 +14,14 @@ First, add this to your `Cargo.toml`:
 fail = "0.1"
 ```
 
-Next, add this to your crate:
+Next, add the following code to your crate:
 
 ```rust
 #[macro_use]
 extern crate fail;
 ```
 
-Define fail points:
+Define the fail points:
 
 ```
 fn function_return_tuple() {
@@ -35,7 +38,7 @@ fn function_conditional(enable: bool) {
 }
 ```
 
-Trigger a fail point via environment variable:
+Trigger a fail point via the environment variable:
 
 ```
 $ FAILPOINTS=bar::foo=panic cargo run
@@ -51,4 +54,6 @@ fn test_foo() {
 }
 ```
 
-Triggered via HTTP API is planned but not implemented yet.
+## To DO
+
+Triggered a fail point via the HTTP API is planned but not implemented yet.
