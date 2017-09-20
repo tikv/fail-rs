@@ -56,4 +56,4 @@ fn test_foo() {
 
 ## To DO
 
-Triggered a fail point via the HTTP API is planned but not implemented yet.
+Triggering a fail point via the HTTP API is planned but not implemented yet.
