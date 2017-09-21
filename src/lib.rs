@@ -11,13 +11,56 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A failpoints implementation for rust.
+//! A fail point implementation for rust.
+//!
+//! Fail points are code points that are used to inject errors by users at runtime.
+//! This crate is inspired by FreeBSD's [failpoints](https://freebsd.org/cgi/man.cgi?query=fail).
+//! Unlike FreeBSD's implementation, this crate only supports the configuration from
+//! environment variables and API.
+//!
+//! ## Installation
+//!
+//! Add this to your `Cargo.toml`:
+//!
+//! ```toml
+//! [dependencies]
+//! fail = "0.1"
+//! ```
+//!
+//! ## Example
+//!
+//! ```rust
+//! #[macro_use]
+//! extern crate fail;
+//!
+//! fn f1() {
+//!     fail_point!("example");
+//!     panic!();
+//! }
+//!
+//! fn main() {
+//!    fail::setup();
+//!    fail::cfg("rust_out::example", "return").unwrap();
+//!    f1();
+//!    fail::teardown();
+//! }
+//! ```
+//!
+//! The above example defines a fail point named "example" and then configures it as `return`.
+//! So the `f1` function will return early and never panic. You can also configure it via the
+//! `FAILPOINTS=rust_out::example=return` environment variable. For more supported
+//! configuration, see docs for macro [`fail_point`](macro.fail_point.html)
+//! and [`setup`](fn.setup.html).
+//!
+//! If you want to disable all the fail points at compile time, you can enable features `disabled`.
+#![deny(missing_docs, missing_debug_implementations)]
 
 #[macro_use]
 extern crate lazy_static;
 extern crate rand;
 
 use std::collections::HashMap;
+use std::env::VarError;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, RwLock, TryLockError};
@@ -176,9 +219,6 @@ impl FromStr for Action {
     }
 }
 
-// A better name?
-pub type ReturnValue = Option<String>;
-
 struct FailPoint {
     pause: Mutex<bool>,
     pause_notifier: Condvar,
@@ -213,7 +253,7 @@ impl FailPoint {
         }
     }
 
-    fn eval(&self, name: &str) -> Option<ReturnValue> {
+    fn eval(&self, name: &str) -> Option<Option<String>> {
         let task = {
             let actions = self.actions.read().unwrap();
             match actions.iter().filter_map(|a| a.get_task()).next() {
@@ -267,9 +307,21 @@ lazy_static! {
     static ref REGISTRY: FailPointRegistry = FailPointRegistry::default();
 }
 
+/// Set up the fail point system.
+///
+/// The `FAILPOINTS` environment variable is used to configure all the fail points.
+/// The format of `FAILPOINTS` is `full_path_to_failpoint=actions;...`.
+///
+/// `full_path_to_failpoint` is the full module path to the fail point and its name.
+/// For more information, see macro [`fail_point`](macro.fail_point.html) and
+/// [`cfg`](fn.cfg.html).
 pub fn setup() {
     let mut registry = REGISTRY.registry.write().unwrap();
-    let failpoints = env::var("FAILPOINTS").unwrap();
+    let failpoints = match env::var("FAILPOINTS") {
+        Ok(s) => s,
+        Err(VarError::NotPresent) => return,
+        Err(e) => panic!("invalid failpoints: {:?}", e),
+    };
     for mut cfg in failpoints.trim().split(";") {
         cfg = cfg.trim();
         if cfg.trim().is_empty() {
@@ -283,6 +335,9 @@ pub fn setup() {
     }
 }
 
+/// Tear down the fail point system.
+///
+/// All the paused fail points will be notified before they are deactivated.
 pub fn teardown() {
     let mut registry = REGISTRY.registry.write().unwrap();
     for (_, p) in &*registry {
@@ -293,7 +348,7 @@ pub fn teardown() {
 }
 
 #[doc(hidden)]
-pub fn eval<R, F: FnOnce(ReturnValue) -> R>(name: &str, f: F) -> Option<R> {
+pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
     let p = {
         let registry = REGISTRY.registry.read().unwrap();
         match registry.get(name) {
@@ -304,11 +359,36 @@ pub fn eval<R, F: FnOnce(ReturnValue) -> R>(name: &str, f: F) -> Option<R> {
     p.eval(name).map(f)
 }
 
+/// Set new actions to a fail point at runtime.
+///
+/// The format of actions is `action[->action...]`. When multiple actions are specified,
+/// an action will be checked only when its former action is not triggered.
+///
+/// The format of an action is `[p%][cnt*]task[(arg)]`. `p%` is the expected probability that
+/// the action is triggered, and `cnt*` is the max times the action can be triggered.
+/// Supported `task` includes:
+///
+/// - `off`, the fail point will do nothing.
+/// - `return(arg)`, return early when the fail point is triggered. `arg` is passed to `$e` (
+/// defined via the `fail_point!` macro) as a string.
+/// - `sleep(milliseconds)`, sleep for the specified time.
+/// - `panic(msg)`, panic with the message.
+/// - `print(msg)`, print the message.
+/// - `pause`, sleep until other action is set to the fail point.
+/// - `yield`, yield the CPU.
+/// - `delay(milliseconds)`, busy waiting for the specified time.
+///
+/// For example, `20%3*print(still alive!)->panic` means the fail point has 20% chance to print a
+/// message "still alive!" and 80% chance to panic. And the message will be printed at most 3
+/// times.
 pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
     let mut registry = REGISTRY.registry.write().unwrap();
     set(&mut registry, name.into(), actions)
 }
 
+/// Remove a fail point.
+///
+/// If the fail point doesn't exist, nothing will happen.
 pub fn remove<S: AsRef<str>>(name: S) {
     let mut registry = REGISTRY.registry.write().unwrap();
     if let Some(p) = registry.remove(name.as_ref()) {
@@ -333,6 +413,34 @@ fn set(
     Ok(())
 }
 
+/// The only entry to define a fail point.
+///
+/// When a fail point is defined, it's referenced via the full module path and name in the
+/// format of `crate::module::submodule::fail_point_name`. For example, library A defines
+/// a fail point in lib.rs as follows:
+///
+/// ```rust
+/// # #[macro_use]
+/// # extern crate fail;
+///
+/// pub fn f() {
+///     fail_point!("p1");
+/// }
+///
+/// mod M {
+///     fn f() {
+///         fail_point!("p2");
+///     }
+/// }
+/// # fn main() {}
+/// ```
+/// The full name of the `p1` fail point is `A::p1`, and `p2` is `A::M::p2`.
+///
+/// `$e` is used to transform a string to the return type of outer function or closure. If
+/// the return type is `()`, then you can use the `fail_point!($name)` shortcut.
+///
+/// If you provide an additional condition `$cond`, then the condition will be evaluated
+/// before the fail point is actually checked.
 #[macro_export]
 #[cfg(not(feature = "disabled"))]
 macro_rules! fail_point {
