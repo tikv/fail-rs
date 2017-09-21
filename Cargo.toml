@@ -17,3 +17,7 @@ rand = "0.3"
 
 [features]
 dormancy = []
+
+[badges]
+travis-ci = { repository = "pingcap/fail-rs" }
+appveyor = { repository = "busyjay/fail-rs" }
