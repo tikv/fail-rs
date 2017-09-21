@@ -15,3 +15,10 @@ categories = ["development-tools::testing"]
 log = "0.3"
 lazy_static = "0.2"
 rand = "0.3"
+
+[features]
+disabled = []
+
+[badges]
+travis-ci = { repository = "pingcap/fail-rs" }
+appveyor = { repository = "busyjay/fail-rs" }

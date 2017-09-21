@@ -178,8 +178,8 @@ fn test_freq_and_count() {
 
 #[test]
 fn test_condition() {
-    let f = |enabled| {
-        fail_point!("condition", enabled, |_| 2);
+    let f = |_enabled| {
+        fail_point!("condition", _enabled, |_| 2);
         0
     };
     assert_eq!(f(false), 0);
