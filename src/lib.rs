@@ -52,7 +52,7 @@
 //! configuration, see docs for macro [`fail_point`](macro.fail_point.html)
 //! and [`setup`](fn.setup.html).
 //!
-//! If you want to disable all the fail points at compile time, you can enable features `disabled`.
+//! If you want to disable all the fail points at compile time, you can enable features `no_fail`.
 #![deny(missing_docs, missing_debug_implementations)]
 
 #[macro_use]
@@ -444,7 +444,7 @@ fn set(
 /// If you provide an additional condition `$cond`, then the condition will be evaluated
 /// before the fail point is actually checked.
 #[macro_export]
-#[cfg(not(feature = "disabled"))]
+#[cfg(not(feature = "no_fail"))]
 macro_rules! fail_point {
     ($name:expr, $e:expr) => {{
         let name = concat!(module_path!(), "::", $name);
@@ -463,7 +463,7 @@ macro_rules! fail_point {
 }
 
 #[macro_export]
-#[cfg(feature = "disabled")]
+#[cfg(feature = "no_fail")]
 macro_rules! fail_point {
     ($name:expr, $e:expr) => {{}};
     ($name:expr) => {{}};
