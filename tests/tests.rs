@@ -65,21 +65,15 @@ fn test_sleep() {
 #[test]
 #[should_panic]
 fn test_panic() {
-    let f = || {
-        fail_point!("panic");
-    };
     fail::cfg("tests::panic", "panic(msg)").unwrap();
-    f()
+    fail_point!("panic");
 }
 
 #[test]
 fn test_print() {
-    let f = || {
-        fail_point!("print");
-    };
     fail::cfg("tests::print", "print(msg)").unwrap();
     // TODO: checkout output.
-    f();
+    fail_point!("print");
 }
 
 #[test]
@@ -113,19 +107,15 @@ fn test_pause() {
 
 #[test]
 fn test_yield() {
-    let f = || {
-        fail_point!("yield");
-    };
     fail::cfg("tests::test", "yield").unwrap();
-    f();
+    fail_point!("yield");
 }
 
 #[test]
 fn test_delay() {
-    let f = || fail_point!("delay");
     let timer = Instant::now();
     fail::cfg("tests::delay", "delay(1000)").unwrap();
-    f();
+    fail_point!("delay");
     assert!(timer.elapsed() > Duration::from_millis(1000));
 }
 
