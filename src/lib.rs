@@ -438,7 +438,7 @@ fn set(
 /// The full name of the `p1` fail point is `A::p1`, and `p2` is `A::my::p2`.
 ///
 /// `$e` is used to transform a string to the return type of outer function or closure.
-/// If you don't need to return a customized value, then you can use the `fail_point!($name)`.
+/// If you don't need to return early or a specified value, then you can use the `fail_point!($name)`.
 ///
 /// If you provide an additional condition `$cond`, then the condition will be evaluated
 /// before the fail point is actually checked.
@@ -447,7 +447,9 @@ fn set(
 macro_rules! fail_point {
     ($name:expr) => {{
         let name = concat!(module_path!(), "::", $name);
-        $crate::eval(name, |_| {});
+        $crate::eval(name, |_| {
+            panic!("Return is not supported for the pattern fail_point!(\"...\")");
+        });
     }};
     ($name:expr, $e:expr) => {{
         let name = concat!(module_path!(), "::", $name);
