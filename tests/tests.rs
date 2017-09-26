@@ -74,7 +74,7 @@ fn test_panic() {
 
 #[test]
 fn test_print() {
-        let f = || {
+    let f = || {
         fail_point!("print");
     };
     fail::cfg("tests::print", "print(msg)").unwrap();
