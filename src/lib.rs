@@ -34,7 +34,7 @@
 //! extern crate fail;
 //!
 //! fn f1() {
-//!     fail_point!("example");
+//!     fail_point!("example", |_| {});
 //!     panic!();
 //! }
 //!
@@ -429,31 +429,36 @@ fn set(
 ///     fail_point!("p1");
 /// }
 ///
-/// mod M {
-///     fn f() {
+/// mod my {
+///     pub fn f() {
 ///         fail_point!("p2");
 ///     }
 /// }
-/// # fn main() {}
-/// ```
-/// The full name of the `p1` fail point is `A::p1`, and `p2` is `A::M::p2`.
 ///
-/// `$e` is used to transform a string to the return type of outer function or closure. If
-/// the return type is `()`, then you can use the `fail_point!($name)` shortcut.
+/// # fn main() { f(); my::f() }
+/// ```
+/// The full name of the `p1` fail point is `A::p1`, and `p2` is `A::my::p2`.
+///
+/// `$e` is used to transform a string to the return type of outer function or closure.
+/// If you don't need to return early or a specified value, then you can use the
+/// `fail_point!($name)`.
 ///
 /// If you provide an additional condition `$cond`, then the condition will be evaluated
 /// before the fail point is actually checked.
 #[macro_export]
 #[cfg(not(feature = "no_fail"))]
 macro_rules! fail_point {
+    ($name:expr) => {{
+        let name = concat!(module_path!(), "::", $name);
+        $crate::eval(name, |_| {
+            panic!("Return is not supported for the pattern fail_point!(\"...\")");
+        });
+    }};
     ($name:expr, $e:expr) => {{
         let name = concat!(module_path!(), "::", $name);
         if let Some(res) = $crate::eval(name, $e) {
             return res;
         }
-    }};
-    ($name:expr) => {{
-        fail_point!($name, |_| {});
     }};
     ($name:expr, $cond:expr, $e:expr) => {{
         if $cond {

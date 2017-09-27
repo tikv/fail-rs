@@ -72,7 +72,7 @@ fn test_panic() {
         fail_point!("panic");
     };
     fail::cfg("tests::panic", "panic(msg)").unwrap();
-    f()
+    f();
 }
 
 #[test]
