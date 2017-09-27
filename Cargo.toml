@@ -12,11 +12,12 @@ description = "Failpoints for rust."
 categories = ["development-tools::testing"]
 
 [dependencies]
+log = "0.3"
 lazy_static = "0.2"
 rand = "0.3"
 
 [features]
-disabled = []
+no_fail = []
 
 [badges]
 travis-ci = { repository = "pingcap/fail-rs" }

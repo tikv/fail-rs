@@ -52,11 +52,13 @@
 //! configuration, see docs for macro [`fail_point`](macro.fail_point.html)
 //! and [`setup`](fn.setup.html).
 //!
-//! If you want to disable all the fail points at compile time, you can enable features `disabled`.
+//! If you want to disable all the fail points at compile time, you can enable features `no_fail`.
 #![deny(missing_docs, missing_debug_implementations)]
 
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate log;
 extern crate rand;
 
 use std::collections::HashMap;
@@ -282,8 +284,8 @@ impl FailPoint {
                 None => panic!("failpoint {} panic", name),
             },
             Task::Print(msg) => match msg {
-                Some(ref msg) => println!("{}", msg),
-                None => println!("failpoint {} executed.", name),
+                Some(ref msg) => info!("{}", msg),
+                None => info!("failpoint {} executed.", name),
             },
             Task::Pause => unreachable!(),
             Task::Yield => thread::yield_now(),
@@ -444,7 +446,7 @@ fn set(
 /// If you provide an additional condition `$cond`, then the condition will be evaluated
 /// before the fail point is actually checked.
 #[macro_export]
-#[cfg(not(feature = "disabled"))]
+#[cfg(not(feature = "no_fail"))]
 macro_rules! fail_point {
     ($name:expr) => {{
         let name = concat!(module_path!(), "::", $name);
@@ -466,7 +468,7 @@ macro_rules! fail_point {
 }
 
 #[macro_export]
-#[cfg(feature = "disabled")]
+#[cfg(feature = "no_fail")]
 macro_rules! fail_point {
     ($name:expr, $e:expr) => {{}};
     ($name:expr) => {{}};
@@ -477,7 +479,9 @@ macro_rules! fail_point {
 mod tests {
     use super::*;
 
-    use std::sync::{mpsc, Arc};
+    use std::sync::*;
+
+    use log::*;
 
     #[test]
     fn test_off() {
@@ -518,9 +522,29 @@ mod tests {
 
     #[test]
     fn test_print() {
+        struct LogCollector(Arc<Mutex<Vec<String>>>);
+        impl Log for LogCollector {
+            fn enabled(&self, _: &LogMetadata) -> bool {
+                true
+            }
+            fn log(&self, record: &LogRecord) {
+                let mut buf = self.0.lock().unwrap();
+                buf.push(format!("{}", record.args()));
+            }
+        }
+
+        let buffer = Arc::new(Mutex::new(vec![]));
+        let collector = LogCollector(buffer.clone());
+        log::set_logger(|e| {
+            e.set(LogLevelFilter::Info);
+            Box::new(collector)
+        }).unwrap();
+
         let point = FailPoint::new();
         point.set_actions(vec![Action::new(Task::Print(None), 1.0, None)]);
         assert!(point.eval("test_fail_point_print").is_none());
+        let msg = buffer.lock().unwrap().pop().unwrap();
+        assert_eq!(msg, "failpoint test_fail_point_print executed.");
     }
 
     #[test]

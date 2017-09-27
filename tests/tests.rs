@@ -13,10 +13,13 @@
 
 #[macro_use]
 extern crate fail;
+extern crate log;
 
-use std::sync::mpsc;
+use std::sync::*;
 use std::time::*;
 use std::*;
+
+use log::*;
 
 #[test]
 fn test_off() {
@@ -74,12 +77,36 @@ fn test_panic() {
 
 #[test]
 fn test_print() {
+    struct LogCollector(Arc<Mutex<Vec<String>>>);
+    impl Log for LogCollector {
+        fn enabled(&self, _: &LogMetadata) -> bool {
+            true
+        }
+        fn log(&self, record: &LogRecord) {
+            let mut buf = self.0.lock().unwrap();
+            buf.push(format!("{}", record.args()));
+        }
+    }
+
+    let buffer = Arc::new(Mutex::new(vec![]));
+    let collector = LogCollector(buffer.clone());
+    log::set_logger(|e| {
+        e.set(LogLevelFilter::Info);
+        Box::new(collector)
+    }).unwrap();
+
     let f = || {
         fail_point!("print");
     };
     fail::cfg("tests::print", "print(msg)").unwrap();
-    // TODO: checkout output.
     f();
+    let msg = buffer.lock().unwrap().pop().unwrap();
+    assert_eq!(msg, "msg");
+
+    fail::cfg("tests::print", "print").unwrap();
+    f();
+    let msg = buffer.lock().unwrap().pop().unwrap();
+    assert_eq!(msg, "failpoint tests::print executed.");
 }
 
 #[test]
