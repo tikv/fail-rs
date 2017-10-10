@@ -224,7 +224,8 @@ impl FromStr for Action {
 struct FailPoint {
     pause: Mutex<bool>,
     pause_notifier: Condvar,
-    actions: RwLock<(Vec<Action>, String)>,
+    actions: RwLock<Vec<Action>>,
+    actions_str: RwLock<String>,
 }
 
 impl FailPoint {
@@ -233,6 +234,7 @@ impl FailPoint {
             pause: Mutex::new(false),
             pause_notifier: Condvar::new(),
             actions: RwLock::default(),
+            actions_str: RwLock::default(),
         }
     }
 
@@ -242,7 +244,8 @@ impl FailPoint {
             match self.actions.try_write() {
                 Err(TryLockError::WouldBlock) => {}
                 Ok(mut guard) => {
-                    *guard = (actions, actions_str.to_string());
+                    *guard = actions;
+                    *self.actions_str.write().unwrap() = actions_str.to_string();
                     return;
                 }
                 Err(e) => panic!("unexpected poison: {:?}", e),
@@ -257,7 +260,7 @@ impl FailPoint {
     fn eval(&self, name: &str) -> Option<Option<String>> {
         let task = {
             let actions = self.actions.read().unwrap();
-            match actions.0.iter().filter_map(|a| a.get_task()).next() {
+            match actions.iter().filter_map(|a| a.get_task()).next() {
                 Some(Task::Pause) => {
                     let mut guard = self.pause.lock().unwrap();
                     *guard = true;
@@ -355,7 +358,9 @@ pub fn list() -> Vec<(String, String)> {
     let registry = REGISTRY.registry.read().unwrap();
     registry
         .iter()
-        .map(|(k, v)| (k.to_string(), v.actions.read().unwrap().1.clone()))
+        .map(|(name, fp)| {
+            (name.to_string(), fp.actions_str.read().unwrap().clone())
+        })
         .collect()
 }
 
