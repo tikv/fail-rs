@@ -189,3 +189,9 @@ fn test_condition() {
 
     assert_eq!(f(true), 2);
 }
+
+#[test]
+fn test_list() {
+    fail::cfg("tests::list", "off").unwrap();
+    assert!(fail::list().contains(&("tests::list".to_string(), "off".to_string())));
+}

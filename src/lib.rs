@@ -225,14 +225,16 @@ struct FailPoint {
     pause: Mutex<bool>,
     pause_notifier: Condvar,
     actions: RwLock<Vec<Action>>,
+    terms: String,
 }
 
 impl FailPoint {
-    fn new() -> FailPoint {
+    fn new(terms: &str) -> FailPoint {
         FailPoint {
             pause: Mutex::new(false),
             pause_notifier: Condvar::new(),
             actions: RwLock::new(vec![]),
+            terms: terms.to_string(),
         }
     }
 
@@ -349,6 +351,17 @@ pub fn teardown() {
     registry.clear();
 }
 
+/// Get all registered fail points.
+///
+/// Return a vector of `(name, actions)` pairs.
+pub fn list() -> Vec<(String, String)> {
+    let registry = REGISTRY.registry.read().unwrap();
+    registry
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.terms.clone()))
+        .collect()
+}
+
 #[doc(hidden)]
 pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
     let p = {
@@ -404,13 +417,14 @@ fn set(
     name: String,
     actions: &str,
 ) -> Result<(), String> {
+    let terms = actions;
     // `actions` are in the format of `failpoint[->failpoint...]`.
     let actions = try!(actions.split("->").map(Action::from_str).collect());
     // Please note that we can't figure out whether there is a failpoint named `name`,
     // so we may insert a failpoint that doesn't exist at all.
     let p = registry
         .entry(name)
-        .or_insert_with(|| Arc::new(FailPoint::new()));
+        .or_insert_with(|| Arc::new(FailPoint::new(terms)));
     p.set_actions(actions);
     Ok(())
 }
@@ -485,14 +499,14 @@ mod tests {
 
     #[test]
     fn test_off() {
-        let point = FailPoint::new();
+        let point = FailPoint::new("");
         point.set_actions(vec![Action::new(Task::Off, 1.0, None)]);
         assert!(point.eval("test_fail_point_off").is_none());
     }
 
     #[test]
     fn test_return() {
-        let point = FailPoint::new();
+        let point = FailPoint::new("");
         point.set_actions(vec![Action::new(Task::Return(None), 1.0, None)]);
         let res = point.eval("test_fail_point_return");
         assert_eq!(res, Some(None));
@@ -505,7 +519,7 @@ mod tests {
 
     #[test]
     fn test_sleep() {
-        let point = FailPoint::new();
+        let point = FailPoint::new("");
         let timer = Instant::now();
         point.set_actions(vec![Action::new(Task::Sleep(1000), 1.0, None)]);
         assert!(point.eval("test_fail_point_sleep").is_none());
@@ -515,7 +529,7 @@ mod tests {
     #[should_panic]
     #[test]
     fn test_panic() {
-        let point = FailPoint::new();
+        let point = FailPoint::new("");
         point.set_actions(vec![Action::new(Task::Panic(None), 1.0, None)]);
         point.eval("test_fail_point_panic");
     }
@@ -540,7 +554,7 @@ mod tests {
             Box::new(collector)
         }).unwrap();
 
-        let point = FailPoint::new();
+        let point = FailPoint::new("");
         point.set_actions(vec![Action::new(Task::Print(None), 1.0, None)]);
         assert!(point.eval("test_fail_point_print").is_none());
         let msg = buffer.lock().unwrap().pop().unwrap();
@@ -549,7 +563,7 @@ mod tests {
 
     #[test]
     fn test_pause() {
-        let point = Arc::new(FailPoint::new());
+        let point = Arc::new(FailPoint::new(""));
         point.set_actions(vec![Action::new(Task::Pause, 1.0, None)]);
         let p = point.clone();
         let (tx, rx) = mpsc::channel();
@@ -564,14 +578,14 @@ mod tests {
 
     #[test]
     fn test_yield() {
-        let point = FailPoint::new();
+        let point = FailPoint::new("");
         point.set_actions(vec![Action::new(Task::Yield, 1.0, None)]);
         assert!(point.eval("test_fail_point_yield").is_none());
     }
 
     #[test]
     fn test_delay() {
-        let point = FailPoint::new();
+        let point = FailPoint::new("");
         let timer = Instant::now();
         point.set_actions(vec![Action::new(Task::Delay(1000), 1.0, None)]);
         assert!(point.eval("test_fail_point_delay").is_none());
@@ -580,7 +594,7 @@ mod tests {
 
     #[test]
     fn test_frequency_and_count() {
-        let point = FailPoint::new();
+        let point = FailPoint::new("");
         point.set_actions(vec![Action::new(Task::Return(None), 0.8, Some(100))]);
         let mut count = 0;
         let mut times = 0f64;
