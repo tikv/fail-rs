@@ -225,6 +225,7 @@ struct FailPoint {
     pause: Mutex<bool>,
     pause_notifier: Condvar,
     actions: RwLock<Vec<Action>>,
+    actions_str: RwLock<String>,
 }
 
 impl FailPoint {
@@ -232,18 +233,19 @@ impl FailPoint {
         FailPoint {
             pause: Mutex::new(false),
             pause_notifier: Condvar::new(),
-            actions: RwLock::new(vec![]),
+            actions: RwLock::default(),
+            actions_str: RwLock::default(),
         }
     }
 
-    #[allow(dead_code)]
-    fn set_actions(&self, actions: Vec<Action>) {
+    fn set_actions(&self, actions_str: &str, actions: Vec<Action>) {
         loop {
             // TODO: maybe busy waiting here.
             match self.actions.try_write() {
                 Err(TryLockError::WouldBlock) => {}
                 Ok(mut guard) => {
                     *guard = actions;
+                    *self.actions_str.write().unwrap() = actions_str.to_string();
                     return;
                 }
                 Err(e) => panic!("unexpected poison: {:?}", e),
@@ -344,9 +346,22 @@ pub fn teardown() {
     let mut registry = REGISTRY.registry.write().unwrap();
     for (_, p) in &*registry {
         // wake up all pause failpoint.
-        p.set_actions(vec![]);
+        p.set_actions("", vec![]);
     }
     registry.clear();
+}
+
+/// Get all registered fail points.
+///
+/// Return a vector of `(name, actions)` pairs.
+pub fn list() -> Vec<(String, String)> {
+    let registry = REGISTRY.registry.read().unwrap();
+    registry
+        .iter()
+        .map(|(name, fp)| {
+            (name.to_string(), fp.actions_str.read().unwrap().clone())
+        })
+        .collect()
 }
 
 #[doc(hidden)]
@@ -395,7 +410,7 @@ pub fn remove<S: AsRef<str>>(name: S) {
     let mut registry = REGISTRY.registry.write().unwrap();
     if let Some(p) = registry.remove(name.as_ref()) {
         // wake up all pause failpoint.
-        p.set_actions(vec![]);
+        p.set_actions("", vec![]);
     }
 }
 
@@ -404,6 +419,7 @@ fn set(
     name: String,
     actions: &str,
 ) -> Result<(), String> {
+    let actions_str = actions;
     // `actions` are in the format of `failpoint[->failpoint...]`.
     let actions = try!(actions.split("->").map(Action::from_str).collect());
     // Please note that we can't figure out whether there is a failpoint named `name`,
@@ -411,7 +427,7 @@ fn set(
     let p = registry
         .entry(name)
         .or_insert_with(|| Arc::new(FailPoint::new()));
-    p.set_actions(actions);
+    p.set_actions(actions_str, actions);
     Ok(())
 }
 
@@ -486,19 +502,19 @@ mod tests {
     #[test]
     fn test_off() {
         let point = FailPoint::new();
-        point.set_actions(vec![Action::new(Task::Off, 1.0, None)]);
+        point.set_actions("", vec![Action::new(Task::Off, 1.0, None)]);
         assert!(point.eval("test_fail_point_off").is_none());
     }
 
     #[test]
     fn test_return() {
         let point = FailPoint::new();
-        point.set_actions(vec![Action::new(Task::Return(None), 1.0, None)]);
+        point.set_actions("", vec![Action::new(Task::Return(None), 1.0, None)]);
         let res = point.eval("test_fail_point_return");
         assert_eq!(res, Some(None));
 
         let ret = Some("test".to_owned());
-        point.set_actions(vec![Action::new(Task::Return(ret.clone()), 1.0, None)]);
+        point.set_actions("", vec![Action::new(Task::Return(ret.clone()), 1.0, None)]);
         let res = point.eval("test_fail_point_return");
         assert_eq!(res, Some(ret));
     }
@@ -507,7 +523,7 @@ mod tests {
     fn test_sleep() {
         let point = FailPoint::new();
         let timer = Instant::now();
-        point.set_actions(vec![Action::new(Task::Sleep(1000), 1.0, None)]);
+        point.set_actions("", vec![Action::new(Task::Sleep(1000), 1.0, None)]);
         assert!(point.eval("test_fail_point_sleep").is_none());
         assert!(timer.elapsed() > Duration::from_millis(1000));
     }
@@ -516,7 +532,7 @@ mod tests {
     #[test]
     fn test_panic() {
         let point = FailPoint::new();
-        point.set_actions(vec![Action::new(Task::Panic(None), 1.0, None)]);
+        point.set_actions("", vec![Action::new(Task::Panic(None), 1.0, None)]);
         point.eval("test_fail_point_panic");
     }
 
@@ -541,7 +557,7 @@ mod tests {
         }).unwrap();
 
         let point = FailPoint::new();
-        point.set_actions(vec![Action::new(Task::Print(None), 1.0, None)]);
+        point.set_actions("", vec![Action::new(Task::Print(None), 1.0, None)]);
         assert!(point.eval("test_fail_point_print").is_none());
         let msg = buffer.lock().unwrap().pop().unwrap();
         assert_eq!(msg, "failpoint test_fail_point_print executed.");
@@ -550,7 +566,7 @@ mod tests {
     #[test]
     fn test_pause() {
         let point = Arc::new(FailPoint::new());
-        point.set_actions(vec![Action::new(Task::Pause, 1.0, None)]);
+        point.set_actions("", vec![Action::new(Task::Pause, 1.0, None)]);
         let p = point.clone();
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
@@ -558,14 +574,14 @@ mod tests {
             tx.send(()).unwrap();
         });
         assert!(rx.recv_timeout(Duration::from_secs(1)).is_err());
-        point.set_actions(vec![Action::new(Task::Off, 1.0, None)]);
+        point.set_actions("", vec![Action::new(Task::Off, 1.0, None)]);
         rx.recv_timeout(Duration::from_secs(1)).unwrap();
     }
 
     #[test]
     fn test_yield() {
         let point = FailPoint::new();
-        point.set_actions(vec![Action::new(Task::Yield, 1.0, None)]);
+        point.set_actions("", vec![Action::new(Task::Yield, 1.0, None)]);
         assert!(point.eval("test_fail_point_yield").is_none());
     }
 
@@ -573,7 +589,7 @@ mod tests {
     fn test_delay() {
         let point = FailPoint::new();
         let timer = Instant::now();
-        point.set_actions(vec![Action::new(Task::Delay(1000), 1.0, None)]);
+        point.set_actions("", vec![Action::new(Task::Delay(1000), 1.0, None)]);
         assert!(point.eval("test_fail_point_delay").is_none());
         assert!(timer.elapsed() > Duration::from_millis(1000));
     }
@@ -581,7 +597,7 @@ mod tests {
     #[test]
     fn test_frequency_and_count() {
         let point = FailPoint::new();
-        point.set_actions(vec![Action::new(Task::Return(None), 0.8, Some(100))]);
+        point.set_actions("", vec![Action::new(Task::Return(None), 0.8, Some(100))]);
         let mut count = 0;
         let mut times = 0f64;
         while count < 100 {
