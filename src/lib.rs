@@ -40,7 +40,7 @@
 //!
 //! fn main() {
 //!    fail::setup();
-//!    fail::cfg("rust_out::example", "return").unwrap();
+//!    fail::cfg("example", "return").unwrap();
 //!    f1();
 //!    fail::teardown();
 //! }
@@ -465,14 +465,12 @@ fn set(
 #[cfg(not(feature = "no_fail"))]
 macro_rules! fail_point {
     ($name:expr) => {{
-        let name = concat!(module_path!(), "::", $name);
-        $crate::eval(name, |_| {
+        $crate::eval($name, |_| {
             panic!("Return is not supported for the pattern fail_point!(\"...\")");
         });
     }};
     ($name:expr, $e:expr) => {{
-        let name = concat!(module_path!(), "::", $name);
-        if let Some(res) = $crate::eval(name, $e) {
+        if let Some(res) = $crate::eval($name, $e) {
             return res;
         }
     }};
@@ -683,7 +681,7 @@ mod tests {
         };
         env::set_var(
             "FAILPOINTS",
-            "fail::tests::setup_and_teardown1=return;fail::tests::setup_and_teardown2=pause;",
+            "setup_and_teardown1=return;setup_and_teardown2=pause;",
         );
         setup();
         assert_eq!(f1(), 1);

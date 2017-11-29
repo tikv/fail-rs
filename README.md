@@ -47,7 +47,7 @@ fn function_conditional(enable: bool) {
 Trigger a fail point via the environment variable:
 
 ```
-$ FAILPOINTS=bar::foo=panic cargo run
+$ FAILPOINTS=foo=panic cargo run
 ```
 
 In unit tests:
@@ -55,7 +55,7 @@ In unit tests:
 ```
 #[test]
 fn test_foo() {
-    fail::cfg("bar::foo", "panic");
+    fail::cfg("foo", "panic");
     foo();
 }
 ```
