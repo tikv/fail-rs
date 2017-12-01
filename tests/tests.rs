@@ -192,7 +192,8 @@ fn test_condition() {
 
 #[test]
 fn test_list() {
-    assert!(!fail::list().contains(&("list".to_string(), "off".to_string())));
+    assert!(!fail::list()
+        .contains(&("list".to_string(), "off".to_string())));
     fail::cfg("list", "off").unwrap();
     assert!(fail::list().contains(&("list".to_string(), "off".to_string())));
     fail::cfg("list", "return").unwrap();
