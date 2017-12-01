@@ -316,7 +316,7 @@ lazy_static! {
 /// The `FAILPOINTS` environment variable is used to configure all the fail points.
 /// The format of `FAILPOINTS` is `failpoint=actions;...`.
 ///
-/// `failpoint` is the fail point and its name.
+/// `failpoint` is the name of the fail point.
 /// For more information, see macro [`fail_point`](macro.fail_point.html) and
 /// [`cfg`](fn.cfg.html).
 pub fn setup() {

@@ -68,7 +68,7 @@ A list of suggestion you should keep in mind:
  - **Enable** `no_fail` feature in release build.
  - Be careful about complex combination.
  - Be careful about the fail point name, it should be self-described.
- - Fail points may have the same name, you should know what you doing when you choose the same name.
+ - Fail points may have the same name, a failure may occur unexpectedly.
 
 ## To DO
 
