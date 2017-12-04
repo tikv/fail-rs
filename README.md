@@ -62,14 +62,14 @@ fn test_foo() {
 
 ## Caveats
 
-Before putting any fail points you should carefully consider the consequences.
-A list of suggestion you should keep in mind:
+Before putting any fail points, you should carefully consider the consequences.
+A list of suggestions you should keep in mind:
 
- - **Enable** `no_fail` feature in release build.
- - Be careful about complex combination.
- - Be careful about the fail point name, it should be self-described.
+ - **Enable** the no_fail feature in the release build.
+ - Be careful about the complex combination.
+ - Be careful about the fail point name and make sure it is self-described.
  - Fail points may have the same name, they take the same actions.
 
-## To DO
+## To Do
 
 Triggering a fail point via the HTTP API is planned but not implemented yet.
