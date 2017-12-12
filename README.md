@@ -47,7 +47,7 @@ fn function_conditional(enable: bool) {
 Trigger a fail point via the environment variable:
 
 ```
-$ FAILPOINTS=bar::foo=panic cargo run
+$ FAILPOINTS=foo=panic cargo run
 ```
 
 In unit tests:
@@ -55,11 +55,21 @@ In unit tests:
 ```
 #[test]
 fn test_foo() {
-    fail::cfg("bar::foo", "panic");
+    fail::cfg("foo", "panic");
     foo();
 }
 ```
 
-## To DO
+## Caveats
+
+Before putting any fail points, you should carefully consider the consequences.
+A list of suggestions you should keep in mind:
+
+ - **Enable** the no_fail feature in the release build.
+ - Be careful about the complex combination.
+ - Be careful about the fail point name and make sure it is self-described.
+ - Fail points might have the same name, and in this case, they take the same actions.
+
+## To Do
 
 Triggering a fail point via the HTTP API is planned but not implemented yet.

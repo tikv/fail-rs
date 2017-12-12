@@ -40,7 +40,7 @@
 //!
 //! fn main() {
 //!    fail::setup();
-//!    fail::cfg("rust_out::example", "return").unwrap();
+//!    fail::cfg("example", "return").unwrap();
 //!    f1();
 //!    fail::teardown();
 //! }
@@ -48,7 +48,7 @@
 //!
 //! The above example defines a fail point named "example" and then configures it as `return`.
 //! So the `f1` function will return early and never panic. You can also configure it via the
-//! `FAILPOINTS=rust_out::example=return` environment variable. For more supported
+//! `FAILPOINTS=example=return` environment variable. For more supported
 //! configuration, see docs for macro [`fail_point`](macro.fail_point.html)
 //! and [`setup`](fn.setup.html).
 //!
@@ -314,9 +314,9 @@ lazy_static! {
 /// Set up the fail point system.
 ///
 /// The `FAILPOINTS` environment variable is used to configure all the fail points.
-/// The format of `FAILPOINTS` is `full_path_to_failpoint=actions;...`.
+/// The format of `FAILPOINTS` is `failpoint=actions;...`.
 ///
-/// `full_path_to_failpoint` is the full module path to the fail point and its name.
+/// `failpoint` is the name of the fail point.
 /// For more information, see macro [`fail_point`](macro.fail_point.html) and
 /// [`cfg`](fn.cfg.html).
 pub fn setup() {
@@ -433,8 +433,7 @@ fn set(
 
 /// The only entry to define a fail point.
 ///
-/// When a fail point is defined, it's referenced via the full module path and name in the
-/// format of `crate::module::submodule::fail_point_name`. For example, library A defines
+/// When a fail point is defined, it's referenced via the name. For example, library A defines
 /// a fail point in lib.rs as follows:
 ///
 /// ```rust
@@ -453,7 +452,6 @@ fn set(
 ///
 /// # fn main() { f(); my::f() }
 /// ```
-/// The full name of the `p1` fail point is `A::p1`, and `p2` is `A::my::p2`.
 ///
 /// `$e` is used to transform a string to the return type of outer function or closure.
 /// If you don't need to return early or a specified value, then you can use the
@@ -465,14 +463,12 @@ fn set(
 #[cfg(not(feature = "no_fail"))]
 macro_rules! fail_point {
     ($name:expr) => {{
-        let name = concat!(module_path!(), "::", $name);
-        $crate::eval(name, |_| {
+        $crate::eval($name, |_| {
             panic!("Return is not supported for the pattern fail_point!(\"...\")");
         });
     }};
     ($name:expr, $e:expr) => {{
-        let name = concat!(module_path!(), "::", $name);
-        if let Some(res) = $crate::eval(name, $e) {
+        if let Some(res) = $crate::eval($name, $e) {
             return res;
         }
     }};
@@ -683,7 +679,7 @@ mod tests {
         };
         env::set_var(
             "FAILPOINTS",
-            "fail::tests::setup_and_teardown1=return;fail::tests::setup_and_teardown2=pause;",
+            "setup_and_teardown1=return;setup_and_teardown2=pause;",
         );
         setup();
         assert_eq!(f1(), 1);

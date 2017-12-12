@@ -29,7 +29,7 @@ fn test_off() {
     };
     assert_eq!(f(), 0);
 
-    fail::cfg("tests::off", "off").unwrap();
+    fail::cfg("off", "off").unwrap();
     assert_eq!(f(), 0);
 }
 
@@ -43,10 +43,10 @@ fn test_return() {
     };
     assert_eq!(f(), 0);
 
-    fail::cfg("tests::return", "return(1000)").unwrap();
+    fail::cfg("return", "return(1000)").unwrap();
     assert_eq!(f(), 1000);
 
-    fail::cfg("tests::return", "return").unwrap();
+    fail::cfg("return", "return").unwrap();
     assert_eq!(f(), 2);
 }
 
@@ -60,7 +60,7 @@ fn test_sleep() {
     assert!(timer.elapsed() < Duration::from_millis(1000));
 
     let timer = Instant::now();
-    fail::cfg("tests::sleep", "sleep(1000)").unwrap();
+    fail::cfg("sleep", "sleep(1000)").unwrap();
     f();
     assert!(timer.elapsed() > Duration::from_millis(1000));
 }
@@ -71,7 +71,7 @@ fn test_panic() {
     let f = || {
         fail_point!("panic");
     };
-    fail::cfg("tests::panic", "panic(msg)").unwrap();
+    fail::cfg("panic", "panic(msg)").unwrap();
     f();
 }
 
@@ -98,15 +98,15 @@ fn test_print() {
     let f = || {
         fail_point!("print");
     };
-    fail::cfg("tests::print", "print(msg)").unwrap();
+    fail::cfg("print", "print(msg)").unwrap();
     f();
     let msg = buffer.lock().unwrap().pop().unwrap();
     assert_eq!(msg, "msg");
 
-    fail::cfg("tests::print", "print").unwrap();
+    fail::cfg("print", "print").unwrap();
     f();
     let msg = buffer.lock().unwrap().pop().unwrap();
-    assert_eq!(msg, "failpoint tests::print executed.");
+    assert_eq!(msg, "failpoint print executed.");
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn test_pause() {
     };
     f();
 
-    fail::cfg("tests::pause", "pause").unwrap();
+    fail::cfg("pause", "pause").unwrap();
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         // pause
@@ -128,11 +128,11 @@ fn test_pause() {
     });
 
     assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
-    fail::cfg("tests::pause", "pause").unwrap();
+    fail::cfg("pause", "pause").unwrap();
     rx.recv_timeout(Duration::from_millis(500)).unwrap();
 
     assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
-    fail::remove("tests::pause");
+    fail::remove("pause");
     rx.recv_timeout(Duration::from_millis(500)).unwrap();
 
     rx.recv_timeout(Duration::from_millis(500)).unwrap();
@@ -143,7 +143,7 @@ fn test_yield() {
     let f = || {
         fail_point!("yield");
     };
-    fail::cfg("tests::test", "yield").unwrap();
+    fail::cfg("test", "yield").unwrap();
     f();
 }
 
@@ -151,7 +151,7 @@ fn test_yield() {
 fn test_delay() {
     let f = || fail_point!("delay");
     let timer = Instant::now();
-    fail::cfg("tests::delay", "delay(1000)").unwrap();
+    fail::cfg("delay", "delay(1000)").unwrap();
     f();
     assert!(timer.elapsed() > Duration::from_millis(1000));
 }
@@ -165,7 +165,7 @@ fn test_freq_and_count() {
         0
     };
     fail::cfg(
-        "tests::freq_and_count",
+        "freq_and_count",
         "50%50*return(1)->50%50*return(-1)->50*return",
     ).unwrap();
     let mut sum = 0;
@@ -184,7 +184,7 @@ fn test_condition() {
     };
     assert_eq!(f(false), 0);
 
-    fail::cfg("tests::condition", "return").unwrap();
+    fail::cfg("condition", "return").unwrap();
     assert_eq!(f(false), 0);
 
     assert_eq!(f(true), 2);
@@ -192,9 +192,10 @@ fn test_condition() {
 
 #[test]
 fn test_list() {
-    assert!(!fail::list().contains(&("tests::list".to_string(), "off".to_string())));
-    fail::cfg("tests::list", "off").unwrap();
-    assert!(fail::list().contains(&("tests::list".to_string(), "off".to_string())));
-    fail::cfg("tests::list", "return").unwrap();
-    assert!(fail::list().contains(&("tests::list".to_string(), "return".to_string())));
+    assert!(!fail::list()
+        .contains(&("list".to_string(), "off".to_string())));
+    fail::cfg("list", "off").unwrap();
+    assert!(fail::list().contains(&("list".to_string(), "off".to_string())));
+    fail::cfg("list", "return").unwrap();
+    assert!(fail::list().contains(&("list".to_string(), "return".to_string())));
 }
