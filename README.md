@@ -17,7 +17,7 @@ First, add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-fail = "0.1"
+fail = "0.2"
 ```
 
 Next, add the following code to your crate:

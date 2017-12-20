@@ -24,7 +24,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! fail = "0.1"
+//! fail = "0.2"
 //! ```
 //!
 //! ## Example
