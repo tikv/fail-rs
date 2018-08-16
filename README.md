@@ -29,7 +29,7 @@ extern crate fail;
 
 Define the fail points:
 
-```
+```rust
 fn function_return_tuple() {
     fail_point!("name1");
 }
@@ -46,13 +46,13 @@ fn function_conditional(enable: bool) {
 
 Trigger a fail point via the environment variable:
 
-```
+```bash
 $ FAILPOINTS=foo=panic cargo run
 ```
 
 In unit tests:
 
-```
+```rust
 #[test]
 fn test_foo() {
     fail::cfg("foo", "panic");
