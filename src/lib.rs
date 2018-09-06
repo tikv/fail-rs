@@ -54,6 +54,7 @@
 //!
 //! If you want to disable all the fail points at compile time, you can enable features `no_fail`.
 #![deny(missing_docs, missing_debug_implementations)]
+#![cfg_attr(feature = "cargo-clippy", feature(tool_lints))]
 
 #[macro_use]
 extern crate lazy_static;
@@ -64,8 +65,8 @@ extern crate rand;
 use std::collections::HashMap;
 use std::env::VarError;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, RwLock, TryLockError};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, RwLock, TryLockError};
 use std::time::{Duration, Instant};
 use std::{env, thread};
 
@@ -118,8 +119,8 @@ impl PartialEq for Action {
 impl Action {
     fn new(task: Task, freq: f32, max_cnt: Option<usize>) -> Action {
         Action {
-            task: task,
-            freq: freq,
+            task,
+            freq,
             count: max_cnt.map(AtomicUsize::new),
         }
     }
@@ -171,7 +172,7 @@ impl FromStr for Action {
         let (first, second) = partition(remain, '(');
         if let Some(second) = second {
             remain = first;
-            if !second.ends_with(")") {
+            if !second.ends_with(')') {
                 return Err("parentheses not match".to_owned());
             }
             args = Some(&second[..second.len() - 1]);
@@ -198,9 +199,9 @@ impl FromStr for Action {
         }
 
         let parse_timeout = || match args {
-            None => return Err("sleep require timeout".to_owned()),
+            None => Err("sleep require timeout".to_owned()),
             Some(timeout_str) => match timeout_str.parse() {
-                Err(e) => return Err(format!("failed to parse timeout: {}", e)),
+                Err(e) => Err(format!("failed to parse timeout: {}", e)),
                 Ok(timeout) => Ok(timeout),
             },
         };
@@ -222,8 +223,7 @@ impl FromStr for Action {
 }
 
 struct FailPoint {
-    pause: Mutex<bool>,
-    pause_notifier: Condvar,
+    pause: AtomicBool,
     actions: RwLock<Vec<Action>>,
     actions_str: RwLock<String>,
 }
@@ -231,8 +231,7 @@ struct FailPoint {
 impl FailPoint {
     fn new() -> FailPoint {
         FailPoint {
-            pause: Mutex::new(false),
-            pause_notifier: Condvar::new(),
+            pause: AtomicBool::new(false),
             actions: RwLock::default(),
             actions_str: RwLock::default(),
         }
@@ -251,22 +250,19 @@ impl FailPoint {
                 Err(e) => panic!("unexpected poison: {:?}", e),
             }
 
-            let mut guard = self.pause.lock().unwrap();
-            *guard = false;
-            self.pause_notifier.notify_all();
+            self.pause.store(false, Ordering::Release);
         }
     }
 
+    #[cfg_attr(feature = "cargo-clippy", allow(clippy::option_option))]
     fn eval(&self, name: &str) -> Option<Option<String>> {
         let task = {
             let actions = self.actions.read().unwrap();
             match actions.iter().filter_map(|a| a.get_task()).next() {
                 Some(Task::Pause) => {
-                    let mut guard = self.pause.lock().unwrap();
-                    *guard = true;
+                    self.pause.store(true, Ordering::Release);
                     loop {
-                        guard = self.pause_notifier.wait(guard).unwrap();
-                        if !*guard {
+                        if !self.pause.load(Ordering::Acquire) {
                             break;
                         }
                     }
@@ -326,7 +322,7 @@ pub fn setup() {
         Err(VarError::NotPresent) => return,
         Err(e) => panic!("invalid failpoints: {:?}", e),
     };
-    for mut cfg in failpoints.trim().split(";") {
+    for mut cfg in failpoints.trim().split(';') {
         cfg = cfg.trim();
         if cfg.trim().is_empty() {
             continue;
@@ -344,7 +340,7 @@ pub fn setup() {
 /// All the paused fail points will be notified before they are deactivated.
 pub fn teardown() {
     let mut registry = REGISTRY.registry.write().unwrap();
-    for (_, p) in &*registry {
+    for p in registry.values() {
         // wake up all pause failpoint.
         p.set_actions("", vec![]);
     }
