@@ -66,8 +66,8 @@ use std::env::VarError;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, RwLock, TryLockError};
-use std::{env, thread};
 use std::time::{Duration, Instant};
+use std::{env, thread};
 
 use rand::Closed01;
 
@@ -358,9 +358,7 @@ pub fn list() -> Vec<(String, String)> {
     let registry = REGISTRY.registry.read().unwrap();
     registry
         .iter()
-        .map(|(name, fp)| {
-            (name.to_string(), fp.actions_str.read().unwrap().clone())
-        })
+        .map(|(name, fp)| (name.to_string(), fp.actions_str.read().unwrap().clone()))
         .collect()
 }
 
@@ -685,7 +683,9 @@ mod tests {
         assert_eq!(f1(), 1);
 
         let (tx, rx) = mpsc::channel();
-        thread::spawn(move || { tx.send(f2()).unwrap(); });
+        thread::spawn(move || {
+            tx.send(f2()).unwrap();
+        });
         assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
 
         teardown();
