@@ -65,8 +65,8 @@ extern crate rand;
 use std::collections::HashMap;
 use std::env::VarError;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock, TryLockError};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, RwLock, TryLockError};
 use std::time::{Duration, Instant};
 use std::{env, thread};
 
@@ -223,15 +223,18 @@ impl FromStr for Action {
 }
 
 struct FailPoint {
-    pause: AtomicBool,
+    pause: Mutex<bool>,
+    pause_notifier: Condvar,
     actions: RwLock<Vec<Action>>,
     actions_str: RwLock<String>,
 }
 
+#[cfg_attr(feature = "cargo-clippy", allow(clippy::mutex_atomic))]
 impl FailPoint {
     fn new() -> FailPoint {
         FailPoint {
-            pause: AtomicBool::new(false),
+            pause: Mutex::new(false),
+            pause_notifier: Condvar::new(),
             actions: RwLock::default(),
             actions_str: RwLock::default(),
         }
@@ -249,8 +252,9 @@ impl FailPoint {
                 }
                 Err(e) => panic!("unexpected poison: {:?}", e),
             }
-
-            self.pause.store(false, Ordering::Release);
+            let mut guard = self.pause.lock().unwrap();
+            *guard = false;
+            self.pause_notifier.notify_all();
         }
     }
 
@@ -260,9 +264,11 @@ impl FailPoint {
             let actions = self.actions.read().unwrap();
             match actions.iter().filter_map(|a| a.get_task()).next() {
                 Some(Task::Pause) => {
-                    self.pause.store(true, Ordering::Release);
+                    let mut guard = self.pause.lock().unwrap();
+                    *guard = true;
                     loop {
-                        if !self.pause.load(Ordering::Acquire) {
+                        guard = self.pause_notifier.wait(guard).unwrap();
+                        if !*guard {
                             break;
                         }
                     }
