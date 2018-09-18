@@ -36,9 +36,8 @@ fn test_off() {
 #[test]
 fn test_return() {
     let f = || {
-        fail_point!("return", |s: Option<String>| {
-            s.map_or(2, |s| s.parse().unwrap())
-        });
+        fail_point!("return", |s: Option<String>| s
+            .map_or(2, |s| s.parse().unwrap()));
         0
     };
     assert_eq!(f(), 0);
@@ -159,9 +158,8 @@ fn test_delay() {
 #[test]
 fn test_freq_and_count() {
     let f = || {
-        fail_point!("freq_and_count", |s: Option<String>| {
-            s.map_or(2, |s| s.parse().unwrap())
-        });
+        fail_point!("freq_and_count", |s: Option<String>| s
+            .map_or(2, |s| s.parse().unwrap()));
         0
     };
     fail::cfg(
@@ -192,8 +190,7 @@ fn test_condition() {
 
 #[test]
 fn test_list() {
-    assert!(!fail::list()
-        .contains(&("list".to_string(), "off".to_string())));
+    assert!(!fail::list().contains(&("list".to_string(), "off".to_string())));
     fail::cfg("list", "off").unwrap();
     assert!(fail::list().contains(&("list".to_string(), "off".to_string())));
     fail::cfg("list", "return").unwrap();

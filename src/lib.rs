@@ -54,6 +54,7 @@
 //!
 //! If you want to disable all the fail points at compile time, you can enable features `no_fail`.
 #![deny(missing_docs, missing_debug_implementations)]
+#![cfg_attr(feature = "cargo-clippy", feature(tool_lints))]
 
 #[macro_use]
 extern crate lazy_static;
@@ -66,8 +67,8 @@ use std::env::VarError;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, RwLock, TryLockError};
-use std::{env, thread};
 use std::time::{Duration, Instant};
+use std::{env, thread};
 
 use rand::Closed01;
 
@@ -118,8 +119,8 @@ impl PartialEq for Action {
 impl Action {
     fn new(task: Task, freq: f32, max_cnt: Option<usize>) -> Action {
         Action {
-            task: task,
-            freq: freq,
+            task,
+            freq,
             count: max_cnt.map(AtomicUsize::new),
         }
     }
@@ -171,7 +172,7 @@ impl FromStr for Action {
         let (first, second) = partition(remain, '(');
         if let Some(second) = second {
             remain = first;
-            if !second.ends_with(")") {
+            if !second.ends_with(')') {
                 return Err("parentheses not match".to_owned());
             }
             args = Some(&second[..second.len() - 1]);
@@ -198,9 +199,9 @@ impl FromStr for Action {
         }
 
         let parse_timeout = || match args {
-            None => return Err("sleep require timeout".to_owned()),
+            None => Err("sleep require timeout".to_owned()),
             Some(timeout_str) => match timeout_str.parse() {
-                Err(e) => return Err(format!("failed to parse timeout: {}", e)),
+                Err(e) => Err(format!("failed to parse timeout: {}", e)),
                 Ok(timeout) => Ok(timeout),
             },
         };
@@ -228,6 +229,7 @@ struct FailPoint {
     actions_str: RwLock<String>,
 }
 
+#[cfg_attr(feature = "cargo-clippy", allow(clippy::mutex_atomic))]
 impl FailPoint {
     fn new() -> FailPoint {
         FailPoint {
@@ -250,13 +252,13 @@ impl FailPoint {
                 }
                 Err(e) => panic!("unexpected poison: {:?}", e),
             }
-
             let mut guard = self.pause.lock().unwrap();
             *guard = false;
             self.pause_notifier.notify_all();
         }
     }
 
+    #[cfg_attr(feature = "cargo-clippy", allow(clippy::option_option))]
     fn eval(&self, name: &str) -> Option<Option<String>> {
         let task = {
             let actions = self.actions.read().unwrap();
@@ -326,7 +328,7 @@ pub fn setup() {
         Err(VarError::NotPresent) => return,
         Err(e) => panic!("invalid failpoints: {:?}", e),
     };
-    for mut cfg in failpoints.trim().split(";") {
+    for mut cfg in failpoints.trim().split(';') {
         cfg = cfg.trim();
         if cfg.trim().is_empty() {
             continue;
@@ -344,7 +346,7 @@ pub fn setup() {
 /// All the paused fail points will be notified before they are deactivated.
 pub fn teardown() {
     let mut registry = REGISTRY.registry.write().unwrap();
-    for (_, p) in &*registry {
+    for p in registry.values() {
         // wake up all pause failpoint.
         p.set_actions("", vec![]);
     }
@@ -358,9 +360,7 @@ pub fn list() -> Vec<(String, String)> {
     let registry = REGISTRY.registry.read().unwrap();
     registry
         .iter()
-        .map(|(name, fp)| {
-            (name.to_string(), fp.actions_str.read().unwrap().clone())
-        })
+        .map(|(name, fp)| (name.to_string(), fp.actions_str.read().unwrap().clone()))
         .collect()
 }
 
@@ -685,7 +685,9 @@ mod tests {
         assert_eq!(f1(), 1);
 
         let (tx, rx) = mpsc::channel();
-        thread::spawn(move || { tx.send(f2()).unwrap(); });
+        thread::spawn(move || {
+            tx.send(f2()).unwrap();
+        });
         assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
 
         teardown();

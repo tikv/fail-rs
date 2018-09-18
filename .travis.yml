@@ -1,18 +1,29 @@
-dist: trusty
-sudo: false
 language: rust
-os:
-  - linux
-  - osx
+sudo: false
+env:
+  global:
+    - RUST_BACKTRACE=1
+    - RUSTFLAGS="-D warnings"
+cache: cargo
+
 rust:
-  - stable
-  - beta
-  - nightly
+
 matrix:
-  allow_failures:
-    - rust: nightly
+  include:
+  # This build uses stable and checks rustfmt (clippy is not on stable).
+  - rust: stable
+    install:
+      - rustup component add rustfmt-preview
+    before_script:
+      - cargo fmt --all -- --check
+  - rust: nightly
+    install:
+      - rustup component add clippy-preview --toolchain nightly
+    before_script:
+      - cargo clippy --all -- -D clippy::all
+
+
 script:
-  - if [[ $TRAVIS_RUST_VERSION == "nightly" ]]; then rustup component add clippy-preview && cargo clippy; fi
-  - export RUSTFLAGS=-Dwarnings
-  - cargo build
-  - cargo test --all
+  - cargo test --all -- --nocapture
+  # Validate benches still work.
+  - cargo bench --all -- --test
