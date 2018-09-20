@@ -3,6 +3,7 @@ sudo: false
 env:
   global:
     - RUST_BACKTRACE=1
+    - RUSTFLAGS="--deny=warnings"
 cache: cargo
 rust:
 
@@ -14,7 +15,7 @@ matrix:
         - rustup component add clippy-preview
       before_script:
         - cargo fmt --all -- --check
-        - cargo clippy --all -- -D clippy::all
+        - cargo clippy --all -- -D clippy
     - rust: nightly
 
 script:
