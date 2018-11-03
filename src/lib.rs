@@ -54,7 +54,6 @@
 //!
 //! If you want to disable all the fail points at compile time, you can enable features `no_fail`.
 #![deny(missing_docs, missing_debug_implementations)]
-#![cfg_attr(feature = "cargo-clippy", feature(tool_lints))]
 
 #[macro_use]
 extern crate lazy_static;
