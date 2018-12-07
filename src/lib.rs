@@ -11,48 +11,336 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A fail point implementation for rust.
+//! A fail point implementation for Rust.
 //!
-//! Fail points are code points that are used to inject errors by users at runtime.
-//! This crate is inspired by FreeBSD's [failpoints](https://freebsd.org/cgi/man.cgi?query=fail).
-//! Unlike FreeBSD's implementation, this crate only supports the configuration from
-//! environment variables and API.
+//! Fail points are code instrumentations that allow errors and other behavior
+//! to be injected dynamically at runtime, primarily for testing purposes. Fail
+//! points are flexible and can be configured to exhibit a variety of behavior,
+//! including panics, early returns, and sleeping. They can be controlled both
+//! programmatically and via the environment, and can be triggered
+//! conditionally and probabilistically.
 //!
-//! ## Installation
+//! This crate is inspired by FreeBSD's
+//! [failpoints](https://freebsd.org/cgi/man.cgi?query=fail).
 //!
-//! Add this to your `Cargo.toml`:
+//! ## Usage
+//!
+//! First, add this to your `Cargo.toml`:
 //!
 //! ```toml
 //! [dependencies]
 //! fail = "0.2"
 //! ```
 //!
-//! ## Example
+//! Now you can import the `fail_point!` macro from the `fail` crate and use it
+//! to inject dynamic failures.
+//!
+//! As an example, here's a simple program that uses a fail point to simulate an
+//! I/O panic:
 //!
 //! ```rust
 //! #[macro_use]
 //! extern crate fail;
 //!
-//! fn f1() {
-//!     fail_point!("example", |_| {});
-//!     panic!();
+//! fn do_fallible_work() {
+//!     fail_point!("read-dir");
+//!     let _dir: Vec<_> = std::fs::read_dir(".").unwrap().collect();
+//!     // ... do some work on the directory ...
 //! }
 //!
 //! fn main() {
-//!    fail::setup();
-//!    fail::cfg("example", "return").unwrap();
-//!    f1();
-//!    fail::teardown();
+//!     fail::setup();
+//!     do_fallible_work();
+//!     fail::teardown();
+//!     println!("done");
 //! }
 //! ```
 //!
-//! The above example defines a fail point named "example" and then configures it as `return`.
-//! So the `f1` function will return early and never panic. You can also configure it via the
-//! `FAILPOINTS=example=return` environment variable. For more supported
-//! configuration, see docs for macro [`fail_point`](macro.fail_point.html)
-//! and [`setup`](fn.setup.html).
+//! Here, the program calls `unwrap` on the result of `read_dir`, a function
+//! that returns a `Result`. In other words, this particular program expects
+//! this call to `read_dir` to always succeed. And in practice it almost always
+//! will, which makes the behavior of this program when `read_dir` fails
+//! difficult to test. By instrumenting the program with a fail point we can
+//! pretend that `read_dir` failed, causing the subsequent `unwrap` to panic,
+//! and allowing us to observe the program's behavior under failure conditions.
 //!
-//! If you want to disable all the fail points at compile time, you can enable features `no_fail`.
+//! When the program is run normally it just prints "done":
+//!
+//! ```sh
+//! $ cargo run
+//!     Finished dev [unoptimized + debuginfo] target(s) in 0.01s
+//!      Running `target/debug/failpointtest`
+//! done
+//! ```
+//!
+//! But now, by setting the `FAILPOINTS` variable we can see what happens if the
+//! `read_dir` fails:
+//!
+//! ```sh
+//! FAILPOINTS=read-dir=panic cargo run
+//!     Finished dev [unoptimized + debuginfo] target(s) in 0.01s
+//!      Running `target/debug/failpointtest`
+//! thread 'main' panicked at 'failpoint read-dir panic', /home/ubuntu/.cargo/registry/src/github.com-1ecc6299db9ec823/fail-0.2.0/src/lib.rs:286:25
+//! note: Run with `RUST_BACKTRACE=1` for a backtrace.
+//! ```
+//!
+//! ## Usage in tests
+//!
+//! The previous example triggers a fail point by modifying the `FAILPOINT`
+//! environment variable. In practice, you'll often want to trigger fail points
+//! programmatically, in unit tests. Unfortunately, unit testing with fail
+//! points is complicated by concurrency concerns, so requires some careful
+//! setup. First, let's see the intuitive &mdash; but wrong &mdash; way to test
+//! with fail points.
+//!
+//! This next example is like the previous, except instead of controlling fail
+//! points with an environment variable, it does so with the `fail::cfg`
+//! function, and instead of having a `main` function, it has a test case:
+//!
+//! ```rust
+//! #[macro_use]
+//! extern crate fail;
+//!
+//! fn do_fallible_work() {
+//!     fail_point!("read-dir");
+//!     let _dir: Vec<_> = std::fs::read_dir(".").unwrap().collect();
+//!     // ... do some work on the directory ...
+//! }
+//!
+//! #[test]
+//! #[should_panic]
+//! fn test_fallible_work() {
+//!     fail::setup();
+//!     fail::cfg("read-dir", "panic").unwrap();
+//!     do_fallible_work();
+//!     fail::teardown();
+//! }
+//! ```
+//!
+//! So this is a test that sets up the fail point to panic, and the test is
+//! expected to panic because it has the `#[should_panic]` attribute.
+//!
+//! And this works fine.
+//!
+//! But only in this simple case. It is not correct generally. This is because
+//! fail points are global resources that can be accessed from any thread, and
+//! `setup` and `teardown` are operations that have global effect, and Rust
+//! tests are run in multiple threads, in parallel. As a result, _if more than
+//! one test calls `setup`, `teardown`, or configures the same fail point then
+//! their result is non-deterministic_.
+//!
+//! To account for this we need to serialize the execution of tests by holding
+//! a global lock, and only running a single fail point test at a time.
+//!
+//! Here's the correct way to write this test, and the basic pattern for writing
+//! tests with fail points:
+//!
+//! ```
+//! #[macro_use]
+//! extern crate lazy_static;
+//! #[macro_use]
+//! extern crate fail;
+//!
+//! use std::sync::{Mutex, MutexGuard};
+//!
+//! fn do_fallible_work() {
+//!     fail_point!("read-dir");
+//!     let _dir: Vec<_> = std::fs::read_dir(".").unwrap().collect();
+//!     // ... do some work on the directory ...
+//! }
+//!
+//! lazy_static! {
+//!     static ref LOCK: Mutex<()> = Mutex::new(());
+//! }
+//!
+//! fn setup<'a>() -> MutexGuard<'a, ()> {
+//!     let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+//!     fail::teardown();
+//!     fail::setup();
+//!     guard
+//! }
+//!
+//! #[test]
+//! #[should_panic]
+//! fn test_fallible_work() {
+//!     let _gaurd = setup();
+//!     fail::cfg("read-dir", "panic").unwrap();
+//!     do_fallible_work();
+//! }
+//! ```
+//!
+//! With this arrangement, any test that calls `setup` and holds the resulting
+//! guard for the duration will not run in parallel with other tests. It depends
+//! on the [`lazy_static`](https://crates.io/crates/lazy_static) crate to
+//! initialize a global mutex.
+//!
+//! Note that this type of guard is not only necessary for test cases that
+//! configure fail points, but also, if there are _any_ test cases that enable
+//! fail points in the same crate, then the guard is also necessary for any
+//! tests that execute the code containing those fail points, even if those
+//! tests don't call `fail::cfg` themselves. In our example, consider what
+//! happens of we have two test cases that test `do_fallible_work`, and one of
+//! them configures the fail point, expecting the function to fail, while the
+//! other does not configure the fail point, expecting it to succeed. Then
+//! consider what might happen if those tests execute in parallel &mdash; the
+//! result is not deterministic and there will be spurious test failures.
+//!
+//! Because of this it is a best practice to put all fail point unit tests into
+//! their own binary. Here's an example of a snippet from `Cargo.toml` that
+//! creates a fail-point-specific test binary:
+//!
+//! ```toml
+//! [[test]]
+//! name = "failpoints"
+//! path = "tests/failpoints/mod.rs"
+//! ```
+//!
+//!
+//! ## Early return
+//!
+//! The previous examples illustrate injecting panics via fail points, but
+//! panics aren't the only &mdash; or even the most common &mdash; error pattern
+//! in Rust. The more common type of error is propagated by `Result` return
+//! values, and fail points can inject those as well with "early returns". That
+//! is, when configuring a fail point as "return" (as opposed to "panic"), the
+//! fail point will immediately return from the function, optionally with a
+//! configurable value.
+//!
+//! The setup for early return requires a slightly diferent invocation of the
+//! `fail_point!` macro. To illustrate this, let's modify the `do_fallible_work`
+//! function we used earlier to return a `Result`:
+//!
+//! ```rust
+//! #[macro_use]
+//! extern crate fail;
+//!
+//! use std::io;
+//!
+//! fn do_fallible_work() -> io::Result<()> {
+//!     fail_point!("read-dir");
+//!     let _dir: Vec<_> = std::fs::read_dir(".")?.collect();
+//!     // ... do some work on the directory ...
+//!     Ok(())
+//! }
+//!
+//! fn main() -> io::Result<()> {
+//!     fail::setup();
+//!     do_fallible_work()?;
+//!     fail::teardown();
+//!     println!("done");
+//!     Ok(())
+//! }
+//! ```
+//!
+//! So this example has more proper Rust error handling, with no unwraps
+//! anywhere. Instead it uses `?` to propagate errors via the `Result` type
+//! return values. This is more realistic Rust code.
+//!
+//! The "read-dir" fail point though is not yet configured to support early
+//! return, so if we attempt to configure it to "return", we'll see an error
+//! like
+//!
+//! ```sh
+//! $ FAILPOINTS=read-dir=return cargo run
+//!     Finished dev [unoptimized + debuginfo] target(s) in 0.13s
+//!      Running `target/debug/failpointtest`
+//! thread 'main' panicked at 'Return is not supported for the fail point "read-dir"', src/main.rs:7:5
+//! note: Run with `RUST_BACKTRACE=1` for a backtrace.
+//! ```
+//!
+//! This error tells us that the "read-dir" fail point is not defined correctly
+//! to support early return, and gives us the line number of that fail point.
+//! What we're missing in the fail point definition is code describring _how_ to
+//! return an error value, and the way we do this is by passing `fail_point!` a
+//! closure that returns the same type as the enclosing function.
+//!
+//! Here's a variation that does so:
+//!
+//! ```rust
+//! fn do_fallible_work() -> io::Result<()> {
+//!     fail_point!("read-dir", |_| {
+//!         Err(io::Error::new(io::ErrorKind::PermissionDenied, "error"))
+//!     });
+//!     let _dir: Vec<_> = std::fs::read_dir(".")?.collect();
+//!     // ... do some work on the directory ...
+//!     Ok(())
+//! }
+//! ```
+//!
+//! And now if the "read-dir" fail point is configured to "return" we get a
+//! different result:
+//!
+//! ```sh
+//! $ FAILPOINTS=read-dir=return cargo run
+//!    Compiling failpointtest v0.1.0 (/home/brian/pingcap/failpointtest)
+//!     Finished dev [unoptimized + debuginfo] target(s) in 2.38s
+//!      Running `target/debug/failpointtest`
+//! Error: Custom { kind: PermissionDenied, error: StringError("error") }
+//! ```
+//!
+//! This time, `do_fallible_work` returned the error defined in our closure,
+//! which propagated all the way up and out of main, then Rust's default error
+//! handler printed the error. All as expected.
+//!
+//! There's one other thing to understand about this closure used for early
+//! return, and that's the purpose of the argument. Notice that in the previous
+//! example our closure accepted an argument, but only with the placeholder `_`
+//! &mdash; it didn't do anything with it.
+//!
+//! The purpose of this argument is to customize the return value dynamically:
+//! when configuring a fail point for return, you can also provide a string
+//! representing _what_ should be returned, e.g. "return(true)" or
+//! "return(false)". The closure receives that string inside an `Option<String>`
+//! and is responsible for converting into the proper return type.
+//!
+//! So here's one final variation that accepts that string and incorporates it
+//! into the return value:
+//!
+//! ```rust
+//! fn do_fallible_work() -> io::Result<()> {
+//!     fail_point!("read-dir", |err| {
+//!         let err = err.unwrap_or("error".to_string());
+//!         Err(io::Error::new(io::ErrorKind::PermissionDenied, err))
+//!     });
+//!     let _dir: Vec<_> = std::fs::read_dir(".")?.collect();
+//!     // ... do some work on the directory ...
+//!     Ok(())
+//! }
+//! ```
+//!
+//! And running it with a custom value:
+//!
+//! ```sh
+//! $ FAILPOINTS="read-dir=return(kablooey)" cargo run
+//!     Finished dev [unoptimized + debuginfo] target(s) in 0.10s
+//!      Running `target/debug/failpointtest`
+//! Error: Custom { kind: PermissionDenied, error: StringError("kablooey") }
+//! ```
+//!
+//! ## Advanced usage
+//!
+//! That's the basics of fail points: defining them with `fail_point!`,
+//! configuring them with `FAILPOINTS` and `fail::cfg`, and configuring them to
+//! panic and return early. But that's not all they can do. To learn more see
+//! the documentation for [`cfg`](fn.cfg.html) and
+//! [`fail_point!`](macro.fail_point.html).
+//!
+//!
+//! ## Usage considerations
+//!
+//! For most effective fail point usage, keep in mind the following:
+//!
+//!  - Enable the `no_fail` feature in your release build. This will remove all
+//!    the code for individual fail points, though not the code for calls to
+//!    `setup` and `teardown`.
+//!  - Carefully consider complex, concurrent, non-deterministic combinations of
+//!    fail points. Put test cases exercising fail points into their own test
+//!    crate and protect each test case with a mutex guard.
+//!  - Use self-describing fail point names. 
+//!  - Fail points might have the same name, in which case they take the
+//!    same actions. Be careful about duplicating fail point names, either within
+//!    a single crate, or across multiple crates.
+
 #![deny(missing_docs, missing_debug_implementations)]
 
 #[macro_use]
@@ -314,12 +602,23 @@ lazy_static! {
 
 /// Set up the fail point system.
 ///
-/// The `FAILPOINTS` environment variable is used to configure all the fail points.
-/// The format of `FAILPOINTS` is `failpoint=actions;...`.
+/// Configures all fail points specified in the `FAILPOINTS` environment variable.
+/// It does not otherwise change any existing fail point configuration
 ///
-/// `failpoint` is the name of the fail point.
-/// For more information, see macro [`fail_point`](macro.fail_point.html) and
-/// [`cfg`](fn.cfg.html).
+/// The format of `FAILPOINTS` is `failpoint=actions;...`, where
+/// `failpoint` is the name of the fail point. For more information
+/// about fail point actions see the [`cfg`](fn.cfg.html) function and
+/// the [`fail_point`](macro.fail_point.html) macro.
+///
+/// `FAILPOINTS` may configure fail points that are not actually defined. In
+/// this case the configuration has no effect.
+///
+/// This function should generally be called prior to running a test with fail
+/// points, and afterward paired with [`teardown`](fn.teardown.html).
+///
+/// # Panics
+///
+/// Panics if an action is not formatted correctly.
 pub fn setup() {
     let mut registry = REGISTRY.registry.write().unwrap();
     let failpoints = match env::var("FAILPOINTS") {
@@ -344,7 +643,11 @@ pub fn setup() {
 
 /// Tear down the fail point system.
 ///
-/// All the paused fail points will be notified before they are deactivated.
+/// Clears the configuration of all fail points. Any paused fail
+/// points will be notified before they are deactivated.
+///
+/// This function should generally be called after running a test with fail points.
+/// Calling `teardown` without previously calling `setup` results in a no-op.
 pub fn teardown() {
     let mut registry = REGISTRY.registry.write().unwrap();
     for p in registry.values() {
@@ -377,21 +680,23 @@ pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
     p.eval(name).map(f)
 }
 
-/// Set new actions to a fail point at runtime.
+/// Configure the actions for a fail point at runtime.
 ///
-/// The format of actions is `action[->action...]`. When multiple actions are specified,
-/// an action will be checked only when its former action is not triggered.
+/// Each fail point can be configured with a series of actions, specified by the
+/// `actions` argument. The format of `actions` is `action[->action...]`. When
+/// multiple actions are specified, an action will be checked only when its
+/// former action is not triggered.
 ///
-/// The format of an action is `[p%][cnt*]task[(arg)]`. `p%` is the expected probability that
-/// the action is triggered, and `cnt*` is the max times the action can be triggered.
-/// Supported `task` includes:
+/// The format of a single action is `[p%][cnt*]task[(arg)]`. `p%` is the
+/// expected probability that the action is triggered, and `cnt*` is the max
+/// times the action can be triggered. The supported values of `task` are:
 ///
 /// - `off`, the fail point will do nothing.
 /// - `return(arg)`, return early when the fail point is triggered. `arg` is passed to `$e` (
 /// defined via the `fail_point!` macro) as a string.
 /// - `sleep(milliseconds)`, sleep for the specified time.
 /// - `panic(msg)`, panic with the message.
-/// - `print(msg)`, print the message.
+/// - `print(msg)`, log the message, using the `log` crate, at the `info` level.
 /// - `pause`, sleep until other action is set to the fail point.
 /// - `yield`, yield the CPU.
 /// - `delay(milliseconds)`, busy waiting for the specified time.
@@ -399,6 +704,12 @@ pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
 /// For example, `20%3*print(still alive!)->panic` means the fail point has 20% chance to print a
 /// message "still alive!" and 80% chance to panic. And the message will be printed at most 3
 /// times.
+///
+/// The `FAILPOINTS` environment variable accepts this same syntax for its fail
+/// point actions.
+///
+/// A call to `cfg` with a particular fail point name overwrites any existing actions for
+/// that fail point, including those set via the `FAILPOINTS` environment variable.
 pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
     let mut registry = REGISTRY.registry.write().unwrap();
     set(&mut registry, name.into(), actions)
@@ -432,34 +743,64 @@ fn set(
     Ok(())
 }
 
-/// The only entry to define a fail point.
+/// Define a fail point.
 ///
-/// When a fail point is defined, it's referenced via the name. For example, library A defines
-/// a fail point in lib.rs as follows:
+/// The `fail_point!` macro has three forms, and they all take a name as the
+/// first argument. The simplest form takes only a name and is suitable for
+/// executing most fail point behavior, including panicking, but not for early
+/// return or conditional execution based on a local flag.
+///
+/// The three forms of fail points look as follows.
+///
+/// 1. A basic fail point:
 ///
 /// ```rust
-/// # #[macro_use]
-/// # extern crate fail;
-///
-/// pub fn f() {
-///     fail_point!("p1");
+/// fn function_return_unit() {
+///     fail_point!("fail-point-1");
 /// }
-///
-/// mod my {
-///     pub fn f() {
-///         fail_point!("p2");
-///     }
-/// }
-///
-/// # fn main() { f(); my::f() }
 /// ```
 ///
-/// `$e` is used to transform a string to the return type of outer function or closure.
-/// If you don't need to return early or a specified value, then you can use the
-/// `fail_point!($name)`.
+/// This form of fail point can be configured to panic, print, sleep, pause, etc., but
+/// not to return from the function early.
 ///
-/// If you provide an additional condition `$cond`, then the condition will be evaluated
-/// before the fail point is actually checked.
+/// 2. A fail point that may return early:
+///
+/// ```rust
+/// fn function_return_value() -> u64 {
+///     fail_point!("fail-point-2", |r| r.map_or(2, |e| e.parse().unwrap()));
+///     0
+/// }
+/// ```
+///
+/// This form of fail point can additionally be configured to return early from
+/// the enclosing function. It accepts a closure, which itself accepts an
+/// `Option<String>`, and is expected to transform that argument into the early
+/// return value. The argument string is sourced from the fail point
+/// configuration string. For example configuring this "fail-point-2" as
+/// "return(100)" will execute the fail point closure, passing it a `Some` value
+/// containing a `String` equal to "100"; the closure then parses it into the
+/// return value.
+///
+/// 3. A fail point with conditional execution:
+///
+/// ```rust
+/// fn function_conditional(enable: bool) {
+///     fail_point!("fail-point-3", enable, |_| {});
+/// }
+/// ```
+///
+/// In this final form, the second argument is a local boolean expression that
+/// must evaluate to `true` before the fail point is evaluated. The third
+/// argument is again an early-return closure.
+///
+/// The three macro arguments (or "designators") are called `$name`, `$cond`,
+/// and `$e`. `$name` must be `&str`, `$cond` must be a boolean expression,
+/// and`$e` must be a function or closure that accepts an `Option<String>` and
+/// returns the same type as the enclosing function.
+///
+/// For more examples see the [crate documentation](index.html). For more
+/// information about controlling fail points see the [`cfg`](fn.cfg.html)
+/// function.
 #[macro_export]
 #[cfg(not(feature = "no_fail"))]
 macro_rules! fail_point {
