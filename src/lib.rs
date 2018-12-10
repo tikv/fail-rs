@@ -463,7 +463,7 @@ fn set(
 macro_rules! fail_point {
     ($name:expr) => {{
         $crate::eval($name, |_| {
-            panic!("Return is not supported for the pattern fail_point!(\"...\")");
+            panic!("Return is not supported for the fail point \"{}\"", $name);
         });
     }};
     ($name:expr, $e:expr) => {{
