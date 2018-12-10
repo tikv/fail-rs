@@ -115,6 +115,7 @@
 //!     do_fallible_work();
 //!     fail::teardown();
 //! }
+//! # fn main() { }
 //! ```
 //!
 //! So this is a test that sets up the fail point to panic, and the test is
@@ -167,6 +168,7 @@
 //!     fail::cfg("read-dir", "panic").unwrap();
 //!     do_fallible_work();
 //! }
+//! # fn main() { }
 //! ```
 //!
 //! With this arrangement, any test that calls `setup` and holds the resulting
@@ -257,6 +259,8 @@
 //! Here's a variation that does so:
 //!
 //! ```rust
+//! # #[macro_use] extern crate fail;
+//! # use std::io;
 //! fn do_fallible_work() -> io::Result<()> {
 //!     fail_point!("read-dir", |_| {
 //!         Err(io::Error::new(io::ErrorKind::PermissionDenied, "error"))
@@ -297,6 +301,8 @@
 //! into the return value:
 //!
 //! ```rust
+//! # #[macro_use] extern crate fail;
+//! # use std::io;
 //! fn do_fallible_work() -> io::Result<()> {
 //!     fail_point!("read-dir", |err| {
 //!         let err = err.unwrap_or("error".to_string());
@@ -755,6 +761,7 @@ fn set(
 /// 1. A basic fail point:
 ///
 /// ```rust
+/// # #[macro_use] extern crate fail;
 /// fn function_return_unit() {
 ///     fail_point!("fail-point-1");
 /// }
@@ -766,6 +773,7 @@ fn set(
 /// 2. A fail point that may return early:
 ///
 /// ```rust
+/// # #[macro_use] extern crate fail;
 /// fn function_return_value() -> u64 {
 ///     fail_point!("fail-point-2", |r| r.map_or(2, |e| e.parse().unwrap()));
 ///     0
@@ -784,6 +792,7 @@ fn set(
 /// 3. A fail point with conditional execution:
 ///
 /// ```rust
+/// # #[macro_use] extern crate fail;
 /// fn function_conditional(enable: bool) {
 ///     fail_point!("fail-point-3", enable, |_| {});
 /// }
