@@ -172,7 +172,7 @@ impl FromStr for Action {
         if let Some(second) = second {
             remain = first;
             if !second.ends_with(')') {
-                return Err("parentheses not match".to_owned());
+                return Err("parentheses do not match".to_owned());
             }
             args = Some(&second[..second.len() - 1]);
         }
@@ -335,7 +335,9 @@ pub fn setup() {
         let (name, order) = partition(cfg, '=');
         match order {
             None => panic!("invalid failpoint: {:?}", cfg),
-            Some(order) => set(&mut registry, name.to_owned(), order).unwrap(),
+            Some(order) => if let Err(e) = set(&mut registry, name.to_owned(), order) {
+                panic!("unable to configure failpoint \"{}\": {}", name, e);
+            }
         }
     }
 }
