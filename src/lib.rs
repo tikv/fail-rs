@@ -228,7 +228,7 @@ struct FailPoint {
     actions_str: RwLock<String>,
 }
 
-#[cfg_attr(feature = "cargo-clippy", allow(mutex_atomic))]
+#[cfg_attr(feature = "cargo-clippy", allow(clippy::mutex_atomic))]
 impl FailPoint {
     fn new() -> FailPoint {
         FailPoint {
@@ -257,7 +257,7 @@ impl FailPoint {
         }
     }
 
-    #[cfg_attr(feature = "cargo-clippy", allow(option_option))]
+    #[cfg_attr(feature = "cargo-clippy", allow(clippy::option_option))]
     fn eval(&self, name: &str) -> Option<Option<String>> {
         let task = {
             let actions = self.actions.read().unwrap();
@@ -549,7 +549,8 @@ mod tests {
         log::set_logger(|e| {
             e.set(LogLevelFilter::Info);
             Box::new(collector)
-        }).unwrap();
+        })
+        .unwrap();
 
         let point = FailPoint::new();
         point.set_actions("", vec![Action::new(Task::Print(None), 1.0, None)]);
