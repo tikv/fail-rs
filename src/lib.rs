@@ -342,7 +342,7 @@
 //!  - Carefully consider complex, concurrent, non-deterministic combinations of
 //!    fail points. Put test cases exercising fail points into their own test
 //!    crate and protect each test case with a mutex guard.
-//!  - Use self-describing fail point names. 
+//!  - Use self-describing fail point names.
 //!  - Fail points might have the same name, in which case they take the
 //!    same actions. Be careful about duplicating fail point names, either within
 //!    a single crate, or across multiple crates.
@@ -640,8 +640,10 @@ pub fn setup() {
         let (name, order) = partition(cfg, '=');
         match order {
             None => panic!("invalid failpoint: {:?}", cfg),
-            Some(order) => if let Err(e) = set(&mut registry, name.to_owned(), order) {
-                panic!("unable to configure failpoint \"{}\": {}", name, e);
+            Some(order) => {
+                if let Err(e) = set(&mut registry, name.to_owned(), order) {
+                    panic!("unable to configure failpoint \"{}\": {}", name, e);
+                }
             }
         }
     }
@@ -901,7 +903,8 @@ mod tests {
         log::set_logger(|e| {
             e.set(LogLevelFilter::Info);
             Box::new(collector)
-        }).unwrap();
+        })
+        .unwrap();
 
         let point = FailPoint::new();
         point.set_actions("", vec![Action::new(Task::Print(None), 1.0, None)]);

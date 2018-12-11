@@ -92,7 +92,8 @@ fn test_print() {
     log::set_logger(|e| {
         e.set(LogLevelFilter::Info);
         Box::new(collector)
-    }).unwrap();
+    })
+    .unwrap();
 
     let f = || {
         fail_point!("print");
@@ -165,7 +166,8 @@ fn test_freq_and_count() {
     fail::cfg(
         "freq_and_count",
         "50%50*return(1)->50%50*return(-1)->50*return",
-    ).unwrap();
+    )
+    .unwrap();
     let mut sum = 0;
     for _ in 0..5000 {
         let res = f();
