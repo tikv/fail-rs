@@ -1,3 +1,7 @@
+# 0.2.1 - 2018-12-13
+
+- improve documentation
+
 # 0.2.0 - 2017-12-21
 
 - use name to identify failpoint instead of absolute module path
