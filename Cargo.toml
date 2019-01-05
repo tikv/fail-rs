@@ -10,6 +10,7 @@ homepage = "https://github.com/pingcap/fail-rs"
 documentation = "https://docs.rs/fail"
 description = "Failpoints for rust."
 categories = ["development-tools::testing"]
+edition = "2018"
 
 [dependencies]
 log = { version = "0.4", features = ["std"] }
