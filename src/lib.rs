@@ -499,12 +499,12 @@ impl FromStr for Action {
         let task = match remain {
             "off" => Task::Off,
             "return" => Task::Return(args.map(str::to_owned)),
-            "sleep" => Task::Sleep(r#try!(parse_timeout())),
+            "sleep" => Task::Sleep(parse_timeout()?),
             "panic" => Task::Panic(args.map(str::to_owned)),
             "print" => Task::Print(args.map(str::to_owned)),
             "pause" => Task::Pause,
             "yield" => Task::Yield,
-            "delay" => Task::Delay(r#try!(parse_timeout())),
+            "delay" => Task::Delay(parse_timeout()?),
             _ => return Err(format!("unrecognized command {:?}", remain)),
         };
 
