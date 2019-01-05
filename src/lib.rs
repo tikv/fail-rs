@@ -499,12 +499,12 @@ impl FromStr for Action {
         let task = match remain {
             "off" => Task::Off,
             "return" => Task::Return(args.map(str::to_owned)),
-            "sleep" => Task::Sleep(try!(parse_timeout())),
+            "sleep" => Task::Sleep(r#try!(parse_timeout())),
             "panic" => Task::Panic(args.map(str::to_owned)),
             "print" => Task::Print(args.map(str::to_owned)),
             "pause" => Task::Pause,
             "yield" => Task::Yield,
-            "delay" => Task::Delay(try!(parse_timeout())),
+            "delay" => Task::Delay(r#try!(parse_timeout())),
             _ => return Err(format!("unrecognized command {:?}", remain)),
         };
 
@@ -738,7 +738,7 @@ fn set(
 ) -> Result<(), String> {
     let actions_str = actions;
     // `actions` are in the format of `failpoint[->failpoint...]`.
-    let actions = try!(actions.split("->").map(Action::from_str).collect());
+    let actions = r#try!(actions.split("->").map(Action::from_str).collect());
     // Please note that we can't figure out whether there is a failpoint named `name`,
     // so we may insert a failpoint that doesn't exist at all.
     let p = registry
