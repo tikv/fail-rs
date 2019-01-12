@@ -12,9 +12,9 @@ description = "Failpoints for rust."
 categories = ["development-tools::testing"]
 
 [dependencies]
-log = "0.3"
-lazy_static = "0.2"
-rand = "0.3"
+log = { version = "0.4", features = ["std"] }
+lazy_static = "1.2"
+rand = "0.6"
 
 [features]
 no_fail = []
