@@ -363,7 +363,7 @@ use std::sync::{Arc, Condvar, Mutex, RwLock, TryLockError};
 use std::time::{Duration, Instant};
 use std::{env, thread};
 
-use rand::Closed01;
+use rand::Rng;
 
 /// Supported tasks.
 #[derive(Clone, Debug, PartialEq)]
@@ -425,11 +425,8 @@ impl Action {
                 return None;
             }
         }
-        if self.freq < 1f32 {
-            let Closed01(f) = rand::random::<Closed01<f32>>();
-            if f > self.freq {
-                return None;
-            }
+        if self.freq < 1f32 && !rand::thread_rng().gen_bool(f64::from(self.freq)) {
+            return None;
         }
         if let Some(ref cnt) = self.count {
             loop {
@@ -846,8 +843,6 @@ mod tests {
 
     use std::sync::*;
 
-    use log::*;
-
     #[test]
     fn test_off() {
         let point = FailPoint::new();
@@ -888,23 +883,21 @@ mod tests {
     #[test]
     fn test_print() {
         struct LogCollector(Arc<Mutex<Vec<String>>>);
-        impl Log for LogCollector {
-            fn enabled(&self, _: &LogMetadata) -> bool {
+        impl log::Log for LogCollector {
+            fn enabled(&self, _: &log::Metadata) -> bool {
                 true
             }
-            fn log(&self, record: &LogRecord) {
+            fn log(&self, record: &log::Record) {
                 let mut buf = self.0.lock().unwrap();
                 buf.push(format!("{}", record.args()));
             }
+            fn flush(&self) {}
         }
 
         let buffer = Arc::new(Mutex::new(vec![]));
         let collector = LogCollector(buffer.clone());
-        log::set_logger(|e| {
-            e.set(LogLevelFilter::Info);
-            Box::new(collector)
-        })
-        .unwrap();
+        log::set_max_level(log::LevelFilter::Info);
+        log::set_boxed_logger(Box::new(collector)).unwrap();
 
         let point = FailPoint::new();
         point.set_actions("", vec![Action::new(Task::Print(None), 1.0, None)]);

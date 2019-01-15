@@ -19,8 +19,6 @@ use std::sync::*;
 use std::time::*;
 use std::*;
 
-use log::*;
-
 #[test]
 fn test_off() {
     let f = || {
@@ -77,23 +75,21 @@ fn test_panic() {
 #[test]
 fn test_print() {
     struct LogCollector(Arc<Mutex<Vec<String>>>);
-    impl Log for LogCollector {
-        fn enabled(&self, _: &LogMetadata) -> bool {
+    impl log::Log for LogCollector {
+        fn enabled(&self, _: &log::Metadata) -> bool {
             true
         }
-        fn log(&self, record: &LogRecord) {
+        fn log(&self, record: &log::Record) {
             let mut buf = self.0.lock().unwrap();
             buf.push(format!("{}", record.args()));
         }
+        fn flush(&self) {}
     }
 
     let buffer = Arc::new(Mutex::new(vec![]));
     let collector = LogCollector(buffer.clone());
-    log::set_logger(|e| {
-        e.set(LogLevelFilter::Info);
-        Box::new(collector)
-    })
-    .unwrap();
+    log::set_max_level(log::LevelFilter::Info);
+    log::set_boxed_logger(Box::new(collector)).unwrap();
 
     let f = || {
         fail_point!("print");
