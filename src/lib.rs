@@ -738,7 +738,7 @@ fn set(
 ) -> Result<(), String> {
     let actions_str = actions;
     // `actions` are in the format of `failpoint[->failpoint...]`.
-    let actions = r#try!(actions.split("->").map(Action::from_str).collect());
+    let actions = actions.split("->").map(Action::from_str).collect::<Result<_, _>>()?;
     // Please note that we can't figure out whether there is a failpoint named `name`,
     // so we may insert a failpoint that doesn't exist at all.
     let p = registry
