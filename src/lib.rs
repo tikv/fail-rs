@@ -90,51 +90,11 @@
 //! environment variable. In practice, you'll often want to trigger fail points
 //! programmatically, in unit tests. Unfortunately, unit testing with fail
 //! points is complicated by concurrency concerns, so requires some careful
-//! setup. First, let's see the intuitive &mdash; but wrong &mdash; way to test
-//! with fail points.
+//! setup. Fail points are global resources, and Rust tests run in parallel,
+//! so tests that exercise fail points generally need to hold a lock to
+//! avoid interfering with each other.
 //!
-//! This next example is like the previous, except instead of controlling fail
-//! points with an environment variable, it does so with the `fail::cfg`
-//! function, and instead of having a `main` function, it has a test case:
-//!
-//! ```rust
-//! #[macro_use]
-//! extern crate fail;
-//!
-//! fn do_fallible_work() {
-//!     fail_point!("read-dir");
-//!     let _dir: Vec<_> = std::fs::read_dir(".").unwrap().collect();
-//!     // ... do some work on the directory ...
-//! }
-//!
-//! #[test]
-//! #[should_panic]
-//! fn test_fallible_work() {
-//!     fail::setup();
-//!     fail::cfg("read-dir", "panic").unwrap();
-//!     do_fallible_work();
-//!     fail::teardown();
-//! }
-//! # fn main() { }
-//! ```
-//!
-//! So this is a test that sets up the fail point to panic, and the test is
-//! expected to panic because it has the `#[should_panic]` attribute.
-//!
-//! And this works fine.
-//!
-//! But only in this simple case. It is not correct generally. This is because
-//! fail points are global resources that can be accessed from any thread, and
-//! `setup` and `teardown` are operations that have global effect, and Rust
-//! tests are run in multiple threads, in parallel. As a result, _if more than
-//! one test calls `setup`, `teardown`, or configures the same fail point then
-//! their result is non-deterministic_.
-//!
-//! To account for this we need to serialize the execution of tests by holding
-//! a global lock, and only running a single fail point test at a time.
-//!
-//! Here's the correct way to write this test, and the basic pattern for writing
-//! tests with fail points:
+//! Here's a basic pattern for writing unit tests tests with fail points:
 //!
 //! ```
 //! #[macro_use]
@@ -176,20 +136,11 @@
 //! on the [`lazy_static`](https://crates.io/crates/lazy_static) crate to
 //! initialize a global mutex.
 //!
-//! Note that this type of guard is not only necessary for test cases that
-//! configure fail points, but also, if there are _any_ test cases that enable
-//! fail points in the same crate, then the guard is also necessary for any
-//! tests that execute the code containing those fail points, even if those
-//! tests don't call `fail::cfg` themselves. In our example, consider what
-//! happens of we have two test cases that test `do_fallible_work`, and one of
-//! them configures the fail point, expecting the function to fail, while the
-//! other does not configure the fail point, expecting it to succeed. Then
-//! consider what might happen if those tests execute in parallel &mdash; the
-//! result is not deterministic and there will be spurious test failures.
-//!
-//! Because of this it is a best practice to put all fail point unit tests into
-//! their own binary. Here's an example of a snippet from `Cargo.toml` that
-//! creates a fail-point-specific test binary:
+//! Even if a test does not itself turn on any fail points, code that it runs
+//! could trigger a fail point that was configured by another thread. Because of
+//! this it is a best practice to put all fail point unit tests into their own
+//! binary. Here's an example of a snippet from `Cargo.toml` that creates a
+//! fail-point-specific test binary:
 //!
 //! ```toml
 //! [[test]]
@@ -234,7 +185,7 @@
 //! }
 //! ```
 //!
-//! So this example has more proper Rust error handling, with no unwraps
+//! This example has more proper Rust error handling, with no unwraps
 //! anywhere. Instead it uses `?` to propagate errors via the `Result` type
 //! return values. This is more realistic Rust code.
 //!
@@ -283,45 +234,7 @@
 //! ```
 //!
 //! This time, `do_fallible_work` returned the error defined in our closure,
-//! which propagated all the way up and out of main, then Rust's default error
-//! handler printed the error. All as expected.
-//!
-//! There's one other thing to understand about this closure used for early
-//! return, and that's the purpose of the argument. Notice that in the previous
-//! example our closure accepted an argument, but only with the placeholder `_`
-//! &mdash; it didn't do anything with it.
-//!
-//! The purpose of this argument is to customize the return value dynamically:
-//! when configuring a fail point for return, you can also provide a string
-//! representing _what_ should be returned, e.g. "return(true)" or
-//! "return(false)". The closure receives that string inside an `Option<String>`
-//! and is responsible for converting into the proper return type.
-//!
-//! So here's one final variation that accepts that string and incorporates it
-//! into the return value:
-//!
-//! ```rust
-//! # #[macro_use] extern crate fail;
-//! # use std::io;
-//! fn do_fallible_work() -> io::Result<()> {
-//!     fail_point!("read-dir", |err| {
-//!         let err = err.unwrap_or("error".to_string());
-//!         Err(io::Error::new(io::ErrorKind::PermissionDenied, err))
-//!     });
-//!     let _dir: Vec<_> = std::fs::read_dir(".")?.collect();
-//!     // ... do some work on the directory ...
-//!     Ok(())
-//! }
-//! ```
-//!
-//! And running it with a custom value:
-//!
-//! ```sh
-//! $ FAILPOINTS="read-dir=return(kablooey)" cargo run
-//!     Finished dev [unoptimized + debuginfo] target(s) in 0.10s
-//!      Running `target/debug/failpointtest`
-//! Error: Custom { kind: PermissionDenied, error: StringError("kablooey") }
-//! ```
+//! which propagated all the way up and out of main.
 //!
 //! ## Advanced usage
 //!
@@ -342,7 +255,6 @@
 //!  - Carefully consider complex, concurrent, non-deterministic combinations of
 //!    fail points. Put test cases exercising fail points into their own test
 //!    crate and protect each test case with a mutex guard.
-//!  - Use self-describing fail point names.
 //!  - Fail points might have the same name, in which case they take the
 //!    same actions. Be careful about duplicating fail point names, either within
 //!    a single crate, or across multiple crates.
