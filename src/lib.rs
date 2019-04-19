@@ -543,7 +543,7 @@ pub fn setup() {
     };
     for mut cfg in failpoints.trim().split(';') {
         cfg = cfg.trim();
-        if cfg.trim().is_empty() {
+        if cfg.is_empty() {
             continue;
         }
         let (name, order) = partition(cfg, '=');
