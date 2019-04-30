@@ -269,9 +269,9 @@ use std::sync::{Arc, Condvar, Mutex, RwLock, TryLockError};
 use std::time::{Duration, Instant};
 use std::{env, thread};
 
-use rand::Rng;
 use lazy_static::lazy_static;
 use log::info;
+use rand::Rng;
 
 /// Supported tasks.
 #[derive(Clone, Debug, PartialEq)]
