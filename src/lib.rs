@@ -460,7 +460,7 @@ impl FailPoint {
     fn eval(&self, name: &str) -> Option<Option<String>> {
         let task = {
             let actions = self.actions.read().unwrap();
-            match actions.iter().filter_map(|a| a.get_task()).next() {
+            match actions.iter().filter_map(Action::get_task).next() {
                 Some(Task::Pause) => {
                     let mut guard = self.pause.lock().unwrap();
                     *guard = true;
