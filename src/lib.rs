@@ -261,12 +261,6 @@
 
 #![deny(missing_docs, missing_debug_implementations)]
 
-#[macro_use]
-extern crate lazy_static;
-#[macro_use]
-extern crate log;
-extern crate rand;
-
 use std::collections::HashMap;
 use std::env::VarError;
 use std::str::FromStr;
@@ -276,6 +270,8 @@ use std::time::{Duration, Instant};
 use std::{env, thread};
 
 use rand::Rng;
+use lazy_static::lazy_static;
+use log::info;
 
 /// Supported tasks.
 #[derive(Clone, Debug, PartialEq)]

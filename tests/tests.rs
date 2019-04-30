@@ -11,13 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[macro_use]
-extern crate fail;
-extern crate log;
 
 use std::sync::*;
 use std::time::*;
 use std::*;
+
+use fail::fail_point;
 
 #[test]
 fn test_off() {
