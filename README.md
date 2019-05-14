@@ -22,6 +22,7 @@ fail = "0.3"
 ```
 
 Now you can import the `fail_point!` macro from the `fail` crate and use it to inject dynamic failures.
+Fail points generation by this macro is disabled by default, and can be enabled where relevant with the `failpoints` Cargo feature.
 
 As an example, here's a simple program that uses a fail point to simulate an I/O panic:
 
@@ -48,7 +49,7 @@ Here, the program calls `unwrap` on the result of `read_dir`, a function that re
 When the program is run normally it just prints "done":
 
 ```sh
-$ cargo run
+$ cargo run --features fail/failpoints
     Finished dev [unoptimized + debuginfo] target(s) in 0.01s
      Running `target/debug/failpointtest`
 done
@@ -57,7 +58,7 @@ done
 But now, by setting the `FAILPOINTS` variable we can see what happens if the `read_dir` fails:
 
 ```
-FAILPOINTS=read-dir=panic cargo run
+FAILPOINTS=read-dir=panic cargo run --features fail/failpoints
     Finished dev [unoptimized + debuginfo] target(s) in 0.01s
      Running `target/debug/failpointtest`
 thread 'main' panicked at 'failpoint read-dir panic', /home/ubuntu/.cargo/registry/src/github.com-1ecc6299db9ec823/fail-0.2.0/src/lib.rs:286:25

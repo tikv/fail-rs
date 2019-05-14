@@ -30,6 +30,7 @@ fn test_off() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_return() {
     let f = || {
         fail_point!("return", |s: Option<String>| s
@@ -46,6 +47,7 @@ fn test_return() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_sleep() {
     let f = || {
         fail_point!("sleep");
@@ -62,6 +64,7 @@ fn test_sleep() {
 
 #[test]
 #[should_panic]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_panic() {
     let f = || {
         fail_point!("panic");
@@ -71,6 +74,7 @@ fn test_panic() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_print() {
     struct LogCollector(Arc<Mutex<Vec<String>>>);
     impl log::Log for LogCollector {
@@ -104,6 +108,7 @@ fn test_print() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_pause() {
     let f = || {
         fail_point!("pause");
@@ -142,6 +147,7 @@ fn test_yield() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_delay() {
     let f = || fail_point!("delay");
     let timer = Instant::now();
@@ -151,6 +157,7 @@ fn test_delay() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_freq_and_count() {
     let f = || {
         fail_point!("freq_and_count", |s: Option<String>| s
@@ -171,6 +178,7 @@ fn test_freq_and_count() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_condition() {
     let f = |_enabled| {
         fail_point!("condition", _enabled, |_| 2);
