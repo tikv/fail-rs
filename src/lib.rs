@@ -261,12 +261,6 @@
 
 #![deny(missing_docs, missing_debug_implementations)]
 
-#[macro_use]
-extern crate lazy_static;
-#[macro_use]
-extern crate log;
-extern crate rand;
-
 use std::collections::HashMap;
 use std::env::VarError;
 use std::str::FromStr;
@@ -275,6 +269,8 @@ use std::sync::{Arc, Condvar, Mutex, RwLock, TryLockError};
 use std::time::{Duration, Instant};
 use std::{env, thread};
 
+use lazy_static::lazy_static;
+use log::info;
 use rand::Rng;
 
 /// Supported tasks.
@@ -464,7 +460,7 @@ impl FailPoint {
     fn eval(&self, name: &str) -> Option<Option<String>> {
         let task = {
             let actions = self.actions.read().unwrap();
-            match actions.iter().filter_map(|a| a.get_task()).next() {
+            match actions.iter().filter_map(Action::get_task).next() {
                 Some(Task::Pause) => {
                     let mut guard = self.pause.lock().unwrap();
                     *guard = true;
