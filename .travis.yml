@@ -1,15 +1,16 @@
 sudo: false
 
 language: rust
-os:
-  - linux
-  - windows
-  - osx
-rust:
-  - stable
-  - nightly
-  # First Rust 2018 Stable.
-  - 1.31.0
+matrix:
+  include:
+    - os: linux
+      rust: stable
+    - os: linux
+      rust: nightly
+    - os: windows
+      rust: stable
+    - os: osx
+      rust: stable
 env:
   global:
     - RUST_BACKTRACE=1
