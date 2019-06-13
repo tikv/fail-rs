@@ -22,8 +22,16 @@ install:
   - if [[ $TRAVIS_RUST_VERSION == "stable" && $TRAVIS_OS_NAME == "linux" ]]; then rustup component add clippy; fi
 
 script:
+<<<<<<< HEAD
   - if [[ $TRAVIS_RUST_VERSION == "stable" && $TRAVIS_OS_NAME == "linux" ]]; then cargo fmt -- --check; fi
   - if [[ $TRAVIS_RUST_VERSION == "stable" && $TRAVIS_OS_NAME == "linux" ]]; then cargo clippy -- -D clippy::all; fi
   - cargo test --all -- --nocapture
   # Validate benches still work.
   - cargo bench --all -- --test
+=======
+  # Validate features and benches too.
+  - cargo test --all -- --nocapture
+  - cargo bench --all -- --test
+  - cargo test --all --all-features -- --nocapture
+  - cargo bench --all --all-features -- --test
+>>>>>>> master
