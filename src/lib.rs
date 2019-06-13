@@ -511,6 +511,15 @@ lazy_static! {
     static ref REGISTRY: FailPointRegistry = FailPointRegistry::default();
 }
 
+/// Returns whether code generation for failpoints is enabled.
+///
+/// This function allows consumers to check (at runtime) whether the library
+/// was compiled with the (buildtime) `failpoints` feature, which enables
+/// code generation for failpoints.
+pub const fn has_failpoints() -> bool {
+    cfg!(feature = "failpoints")
+}
+
 /// Set up the fail point system.
 ///
 /// Configures all fail points specified in the `FAILPOINTS` environment variable.
@@ -754,6 +763,11 @@ mod tests {
     use super::*;
 
     use std::sync::*;
+
+    #[test]
+    fn test_has_failpoints() {
+        assert_eq!(cfg!(feature = "failpoints"), has_failpoints());
+    }
 
     #[test]
     fn test_off() {
