@@ -19,5 +19,8 @@ install:
 build: false
 
 test_script:
+  # Validate features too.
   - cargo build
-  - cargo test --all
+  - cargo test
+  - cargo build --all-features
+  - cargo test --all --all-features

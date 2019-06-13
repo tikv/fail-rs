@@ -19,6 +19,8 @@ matrix:
     - rust: nightly
 
 script:
+  # Validate features and benches too.
   - cargo test --all -- --nocapture
-  # Validate benches still work.
   - cargo bench --all -- --test
+  - cargo test --all --all-features -- --nocapture
+  - cargo bench --all --all-features -- --test
