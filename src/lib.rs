@@ -420,6 +420,8 @@ impl FromStr for Action {
     }
 }
 
+#[cfg_attr(feature = "cargo-clippy", allow(clippy::mutex_atomic))]
+#[derive(Debug)]
 struct FailPoint {
     pause: Mutex<bool>,
     pause_notifier: Condvar,
@@ -501,7 +503,7 @@ impl FailPoint {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct FailPointRegistry {
     // TODO: remove rwlock or store *mut FailPoint
     registry: RwLock<HashMap<String, Arc<FailPoint>>>,
