@@ -1,26 +1,31 @@
-language: rust
 sudo: false
+
+language: rust
+matrix:
+  include:
+    - os: linux
+      rust: stable
+    - os: linux
+      rust: nightly
+    - os: windows
+      rust: stable
+    - os: osx
+      rust: stable
 env:
   global:
     - RUST_BACKTRACE=1
-    - RUSTFLAGS="--deny=warnings"
+    - RUSTFLAGS="-D warnings"
 cache: cargo
-rust:
 
-matrix:
-  include:
-    - rust: stable
-      install:
-        - rustup component add rustfmt-preview
-        - rustup component add clippy-preview
-      before_script:
-        - cargo fmt --all -- --check
-        - cargo clippy --all -- -D clippy::all
-    - rust: nightly
+install:
+  - if [[ $TRAVIS_RUST_VERSION == "stable" && $TRAVIS_OS_NAME == "linux" ]]; then rustup component add rustfmt; fi
+  - if [[ $TRAVIS_RUST_VERSION == "stable" && $TRAVIS_OS_NAME == "linux" ]]; then rustup component add clippy; fi
 
 script:
-  # Validate features and benches too.
+  - if [[ $TRAVIS_RUST_VERSION == "stable" && $TRAVIS_OS_NAME == "linux" ]]; then cargo fmt -- --check; fi
+  - if [[ $TRAVIS_RUST_VERSION == "stable" && $TRAVIS_OS_NAME == "linux" ]]; then cargo clippy -- -D clippy::all; fi
   - cargo test --all -- --nocapture
-  - cargo bench --all -- --test
   - cargo test --all --all-features -- --nocapture
+  # Validate features and benches too.
+  - cargo bench --all -- --test
   - cargo bench --all --all-features -- --test
