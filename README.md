@@ -1,7 +1,6 @@
 # fail-rs
 
 [![Build Status](https://travis-ci.org/pingcap/fail-rs.svg?branch=master)](https://travis-ci.org/pingcap/fail-rs)
-[![Build status](https://ci.appveyor.com/api/projects/status/vksd5ifajog5gbiu/branch/master?svg=true)](https://ci.appveyor.com/project/busyjay/fail-rs/branch/master)
 [![Crates.io](https://img.shields.io/crates/v/fail.svg?maxAge=2592000)](https://crates.io/crates/fail)
 
 [Documentation](https://docs.rs/fail).
