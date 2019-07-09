@@ -26,8 +26,7 @@ Fail points generation by this macro is disabled by default, and can be enabled 
 As an example, here's a simple program that uses a fail point to simulate an I/O panic:
 
 ```rust
-#[macro_use]
-extern crate fail;
+use fail::{fail_point, FailScenario};
 
 fn do_fallible_work() {
     fail_point!("read-dir");
@@ -36,9 +35,9 @@ fn do_fallible_work() {
 }
 
 fn main() {
-    fail::setup();
+    let scenario = FailScenario::setup();
     do_fallible_work();
-    fail::teardown();
+    scenario.teardown();
     println!("done");
 }
 ```
