@@ -1,3 +1,10 @@
+# 0.3.0 - 2019-07-15
+
+- fail-rs is now 2018-edition compatible!
+- refine documentations
+- add test-mutex pattern directly to the library
+- disable code generation by default
+
 # 0.2.1 - 2018-12-13
 
 - improve documentation
