@@ -246,10 +246,6 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, TryLockError};
 use std::time::{Duration, Instant};
 use std::{env, thread};
 
-use lazy_static::lazy_static;
-use log::info;
-use rand::Rng;
-
 /// Supported tasks.
 #[derive(Clone, Debug, PartialEq)]
 enum Task {
@@ -304,6 +300,8 @@ impl Action {
     }
 
     fn get_task(&self) -> Option<Task> {
+        use rand::Rng;
+
         if let Some(ref cnt) = self.count {
             let c = cnt.load(Ordering::Acquire);
             if c == 0 {
@@ -465,8 +463,8 @@ impl FailPoint {
                 None => panic!("failpoint {} panic", name),
             },
             Task::Print(msg) => match msg {
-                Some(ref msg) => info!("{}", msg),
-                None => info!("failpoint {} executed.", name),
+                Some(ref msg) => log::info!("{}", msg),
+                None => log::info!("failpoint {} executed.", name),
             },
             Task::Pause => unreachable!(),
             Task::Yield => thread::yield_now(),
@@ -489,7 +487,7 @@ struct FailPointRegistry {
     registry: RwLock<Registry>,
 }
 
-lazy_static! {
+lazy_static::lazy_static! {
     static ref REGISTRY: FailPointRegistry = FailPointRegistry::default();
     static ref SCENARIO: Mutex<&'static FailPointRegistry> = Mutex::new(&REGISTRY);
 }
