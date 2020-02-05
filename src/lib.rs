@@ -585,7 +585,11 @@ pub fn list() -> Vec<(String, String)> {
 }
 
 #[doc(hidden)]
-pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
+pub fn eval<R, F: FnOnce(Option<String>) -> R>(
+    name: &str,
+    f: F,
+    cond: impl FnOnce() -> bool,
+) -> Option<R> {
     let p = {
         let registry = REGISTRY.registry.read().unwrap();
         match registry.get(name) {
@@ -593,6 +597,9 @@ pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
             Some(p) => p.clone(),
         }
     };
+    if !cond() {
+        return None;
+    }
     p.eval(name).map(f)
 }
 
@@ -727,18 +734,22 @@ fn set(
 #[cfg(feature = "failpoints")]
 macro_rules! fail_point {
     ($name:expr) => {{
-        $crate::eval($name, |_| {
-            panic!("Return is not supported for the fail point \"{}\"", $name);
-        });
+        $crate::eval(
+            $name,
+            |_| {
+                panic!("Return is not supported for the fail point \"{}\"", $name);
+            },
+            || true,
+        );
     }};
     ($name:expr, $e:expr) => {{
-        if let Some(res) = $crate::eval($name, $e) {
+        if let Some(res) = $crate::eval($name, $e, || true) {
             return res;
         }
     }};
     ($name:expr, $cond:expr, $e:expr) => {{
-        if $cond {
-            fail_point!($name, $e);
+        if let Some(res) = $crate::eval($name, $e, || $cond) {
+            return res;
         }
     }};
 }
