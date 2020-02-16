@@ -36,12 +36,10 @@
 //!     // ... do some work on the directory ...
 //! }
 //!
-//! fn main() {
-//!     let scenario = FailScenario::setup();
-//!     do_fallible_work();
-//!     scenario.teardown();
-//!     println!("done");
-//! }
+//! let scenario = FailScenario::setup();
+//! do_fallible_work();
+//! scenario.teardown();
+//! println!("done");
 //! ```
 //!
 //! Here, the program calls `unwrap` on the result of `read_dir`, a function
@@ -102,7 +100,6 @@
 //!
 //!     scenario.teardown();
 //! }
-//! # fn main() { }
 //! ```
 //!
 //! Even if a test does not itself turn on any fail points, code that it runs
