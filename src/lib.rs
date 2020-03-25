@@ -236,9 +236,7 @@ use std::{env, thread};
 type Callback = Box<dyn Fn() + Send + Sync>;
 
 #[derive(Clone)]
-struct SyncCallback {
-    callback: Arc<Callback>,
-}
+struct SyncCallback(Arc<Callback>);
 
 impl Debug for SyncCallback {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -248,19 +246,17 @@ impl Debug for SyncCallback {
 
 impl PartialEq for SyncCallback {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.callback, &other.callback)
+        Arc::ptr_eq(&self.0, &other.0)
     }
 }
 
 impl SyncCallback {
     fn new(f: Callback) -> SyncCallback {
-        SyncCallback {
-            callback: Arc::new(f),
-        }
+        SyncCallback(Arc::new(f))
     }
 
     fn run(&self) {
-        let callback = &self.callback;
+        let callback = &self.0;
         callback();
     }
 }
