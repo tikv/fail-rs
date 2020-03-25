@@ -107,7 +107,7 @@ fn test_pause() {
 
     fail::cfg("pause", "pause").unwrap();
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    thread::spawn(move || {
         // pause
         tx.send(f()).unwrap();
         // woken up by new order pause, and then pause again.
@@ -139,7 +139,10 @@ fn test_yield() {
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_callback() {
-    let f = || {
+    let f1 = || {
+        fail_point!("cb");
+    };
+    let f2 = || {
         fail_point!("cb");
     };
 
@@ -152,8 +155,9 @@ fn test_callback() {
         }),
     )
     .unwrap();
-    f();
-    assert_eq!(1, counter.load(Ordering::SeqCst));
+    f1();
+    f2();
+    assert_eq!(2, counter.load(Ordering::SeqCst));
 }
 
 #[test]

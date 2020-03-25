@@ -237,7 +237,7 @@ type Callback = Box<dyn Fn() + Send + Sync>;
 
 #[derive(Clone)]
 struct SyncCallback {
-    callback: Arc<Mutex<Callback>>,
+    callback: Arc<Callback>,
 }
 
 impl Debug for SyncCallback {
@@ -250,21 +250,17 @@ impl PartialEq for SyncCallback {
     fn eq(&self, _other: &SyncCallback) -> bool {
         true
     }
-
-    fn ne(&self, _other: &SyncCallback) -> bool {
-        true
-    }
 }
 
 impl SyncCallback {
     fn new(f: Callback) -> SyncCallback {
         SyncCallback {
-            callback: Arc::new(Mutex::new(f)),
+            callback: Arc::new(f),
         }
     }
 
     fn run(&self) {
-        let callback = self.callback.lock().unwrap();
+        let callback = &self.callback;
         callback();
     }
 }
