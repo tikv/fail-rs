@@ -241,14 +241,14 @@ struct SyncCallback {
 }
 
 impl Debug for SyncCallback {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Ok(())
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SyncCallback()")
     }
 }
 
 impl PartialEq for SyncCallback {
-    fn eq(&self, _other: &SyncCallback) -> bool {
-        true
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.callback, &other.callback)
     }
 }
 
