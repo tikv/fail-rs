@@ -226,11 +226,48 @@
 
 use std::collections::HashMap;
 use std::env::VarError;
+use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, TryLockError};
 use std::time::{Duration, Instant};
 use std::{env, thread};
+
+type Callback = Box<dyn Fn() + Send + Sync>;
+
+#[derive(Clone)]
+struct SyncCallback {
+    callback: Arc<Mutex<Callback>>,
+}
+
+impl Debug for SyncCallback {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Ok(())
+    }
+}
+
+impl PartialEq for SyncCallback {
+    fn eq(&self, _other: &SyncCallback) -> bool {
+        true
+    }
+
+    fn ne(&self, _other: &SyncCallback) -> bool {
+        true
+    }
+}
+
+impl SyncCallback {
+    fn new(f: Callback) -> SyncCallback {
+        SyncCallback {
+            callback: Arc::new(Mutex::new(f)),
+        }
+    }
+
+    fn run(&self) {
+        let callback = self.callback.lock().unwrap();
+        callback();
+    }
+}
 
 /// Supported tasks.
 #[derive(Clone, Debug, PartialEq)]
@@ -251,6 +288,8 @@ enum Task {
     Yield,
     /// Busy waiting for some milliseconds.
     Delay(u64),
+    /// Call callback function.
+    Callback(SyncCallback),
 }
 
 #[derive(Debug)]
@@ -282,6 +321,15 @@ impl Action {
             task,
             freq,
             count: max_cnt.map(AtomicUsize::new),
+        }
+    }
+
+    fn from_callback(f: Callback) -> Action {
+        let task = Task::Callback(SyncCallback::new(f));
+        Action {
+            task,
+            freq: 1.0,
+            count: None,
         }
     }
 
@@ -459,6 +507,9 @@ impl FailPoint {
                 let timeout = Duration::from_millis(t);
                 while timer.elapsed() < timeout {}
             }
+            Task::Callback(f) => {
+                f.run();
+            }
         }
         None
     }
@@ -626,6 +677,21 @@ pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
 pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
     let mut registry = REGISTRY.registry.write().unwrap();
     set(&mut registry, name.into(), actions)
+}
+
+/// Configure the actions for a fail point at runtime.
+///
+/// Each fail point can be configured by a callback. Process will call this callback function
+/// when it meet this fail-point.
+pub fn cfg_callback<S: Into<String>>(name: S, f: Callback) -> Result<(), String> {
+    let mut registry = REGISTRY.registry.write().unwrap();
+    let p = registry
+        .entry(name.into())
+        .or_insert_with(|| Arc::new(FailPoint::new()));
+    let action = Action::from_callback(f);
+    let actions = vec![action];
+    p.set_actions("callback", actions);
+    Ok(())
 }
 
 /// Remove a fail point.
