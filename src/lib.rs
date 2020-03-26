@@ -233,10 +233,8 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, TryLockError};
 use std::time::{Duration, Instant};
 use std::{env, thread};
 
-type Callback = Box<dyn Fn() + Send + Sync>;
-
 #[derive(Clone)]
-struct SyncCallback(Arc<Callback>);
+struct SyncCallback(Arc<dyn Fn() + Send + Sync>);
 
 impl Debug for SyncCallback {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -251,7 +249,7 @@ impl PartialEq for SyncCallback {
 }
 
 impl SyncCallback {
-    fn new(f: Callback) -> SyncCallback {
+    fn new(f: impl Fn() + Send + Sync + 'static) -> SyncCallback {
         SyncCallback(Arc::new(f))
     }
 
@@ -316,7 +314,7 @@ impl Action {
         }
     }
 
-    fn from_callback(f: Callback) -> Action {
+    fn from_callback(f: impl Fn() + Send + Sync + 'static) -> Action {
         let task = Task::Callback(SyncCallback::new(f));
         Action {
             task,
@@ -675,7 +673,11 @@ pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
 ///
 /// Each fail point can be configured by a callback. Process will call this callback function
 /// when it meet this fail-point.
-pub fn cfg_callback<S: Into<String>>(name: S, f: Callback) -> Result<(), String> {
+pub fn cfg_callback<S, F>(name: S, f: F) -> Result<(), String>
+where
+    S: Into<String>,
+    F: Fn() + Send + Sync + 'static,
+{
     let mut registry = REGISTRY.registry.write().unwrap();
     let p = registry
         .entry(name.into())

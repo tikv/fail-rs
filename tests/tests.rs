@@ -148,12 +148,9 @@ fn test_callback() {
 
     let counter = Arc::new(AtomicUsize::new(0));
     let counter2 = counter.clone();
-    fail::cfg_callback(
-        "cb",
-        Box::new(move || {
-            counter2.fetch_add(1, Ordering::SeqCst);
-        }),
-    )
+    fail::cfg_callback("cb", move || {
+        counter2.fetch_add(1, Ordering::SeqCst);
+    })
     .unwrap();
     f1();
     f2();
