@@ -1,5 +1,6 @@
 // Copyright 2019 TiKV Project Authors. Licensed under Apache-2.0.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::*;
 use std::time::*;
 use std::*;
@@ -133,6 +134,27 @@ fn test_yield() {
     };
     fail::cfg("test", "yield").unwrap();
     f();
+}
+
+#[test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
+fn test_callback() {
+    let f1 = || {
+        fail_point!("cb");
+    };
+    let f2 = || {
+        fail_point!("cb");
+    };
+
+    let counter = Arc::new(AtomicUsize::new(0));
+    let counter2 = counter.clone();
+    fail::cfg_callback("cb", move || {
+        counter2.fetch_add(1, Ordering::SeqCst);
+    })
+    .unwrap();
+    f1();
+    f2();
+    assert_eq!(2, counter.load(Ordering::SeqCst));
 }
 
 #[test]
