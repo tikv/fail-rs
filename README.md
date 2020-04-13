@@ -1,6 +1,6 @@
 # fail-rs
 
-[![Build Status](https://travis-ci.org/pingcap/fail-rs.svg?branch=master)](https://travis-ci.org/pingcap/fail-rs)
+[![Build Status](https://travis-ci.org/tikv/fail-rs.svg?branch=master)](https://travis-ci.org/tikv/fail-rs)
 [![Crates.io](https://img.shields.io/crates/v/fail.svg?maxAge=2592000)](https://crates.io/crates/fail)
 
 [Documentation](https://docs.rs/fail).
@@ -17,7 +17,7 @@ First, add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-fail = "0.3"
+fail = "0.4"
 ```
 
 Now you can import the `fail_point!` macro from the `fail` crate and use it to inject dynamic failures.

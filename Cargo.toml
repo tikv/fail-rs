@@ -1,14 +1,14 @@
 [package]
 name = "fail"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["The TiKV Project Developers"]
 license = "Apache-2.0"
 keywords = ["failpoints", "fail"]
-repository = "https://github.com/pingcap/fail-rs"
+repository = "https://github.com/tikv/fail-rs"
 readme = "README.md"
-homepage = "https://github.com/pingcap/fail-rs"
+homepage = "https://github.com/tikv/fail-rs"
 documentation = "https://docs.rs/fail"
-description = "Failpoints for rust."
+description = "Fail points for rust."
 categories = ["development-tools::testing"]
 edition = "2018"
 exclude = ["/.github/*", "/.travis.yml", "/appveyor.yml"]
@@ -22,7 +22,7 @@ rand = "0.7"
 failpoints = []
 
 [badges]
-travis-ci = { repository = "pingcap/fail-rs" }
+travis-ci = { repository = "tikv/fail-rs" }
 appveyor = { repository = "busyjay/fail-rs" }
 
 [package.metadata.docs.rs]

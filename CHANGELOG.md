@@ -1,3 +1,9 @@
+# 0.4.0 - 2020-04-13
+
+- re-arrange macros to avoid leaking
+- support callback action
+- update rand to 0.7
+
 # 0.3.0 - 2019-07-15
 
 - fail-rs is now 2018-edition compatible!
