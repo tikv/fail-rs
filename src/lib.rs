@@ -28,7 +28,7 @@
 //! I/O panic:
 //!
 //! ```rust
-//! use fail::{fail_point, FailScenario};
+//! use fail::fail_point;
 //!
 //! fn do_fallible_work() {
 //!     fail_point!("read-dir");
@@ -36,9 +36,9 @@
 //!     // ... do some work on the directory ...
 //! }
 //!
-//! let scenario = FailScenario::setup();
+//! fail::setup();
 //! do_fallible_work();
-//! scenario.teardown();
+//! fail::teardown();
 //! println!("done");
 //! ```
 //!
@@ -75,14 +75,20 @@
 //! The previous example triggers a fail point by modifying the `FAILPOINT`
 //! environment variable. In practice, you'll often want to trigger fail points
 //! programmatically, in unit tests.
-//! Fail points are global resources, and Rust tests run in parallel,
-//! so tests that exercise fail points generally need to hold a lock to
-//! avoid interfering with each other. This is accomplished by `FailScenario`.
+//!
+//! Fail points are managed by the registry which store a map of the fail points
+//! names and actions. The registry is divided into local and global.
+//!
+//! When you don't specifically declare a registry, the global registry will be used
+//! by default. You can pass the setting from environment variables to the global registry.
+//! Sometimes you need different tests to use different registries and don’t want their
+//! behavior to interfere with each other. You can create a local registry and then register
+//! threads that need to share the same registry.
 //!
 //! Here's a basic pattern for writing unit tests tests with fail points:
 //!
 //! ```rust
-//! use fail::{fail_point, FailScenario};
+//! use fail::fail_point;
 //!
 //! fn do_fallible_work() {
 //!     fail_point!("read-dir");
@@ -93,28 +99,57 @@
 //! #[test]
 //! #[should_panic]
 //! fn test_fallible_work() {
-//!     let scenario = FailScenario::setup();
+//!     let local_registry = fail::new_fail_group();
+//!     local_registry.register_current();
 //!     fail::cfg("read-dir", "panic").unwrap();
 //!
 //!     do_fallible_work();
 //!
-//!     scenario.teardown();
+//!     local_registry.cleanup();
 //! }
 //! ```
 //!
-//! Even if a test does not itself turn on any fail points, code that it runs
-//! could trigger a fail point that was configured by another thread. Because of
-//! this it is a best practice to put all fail point unit tests into their own
-//! binary. Here's an example of a snippet from `Cargo.toml` that creates a
-//! fail-point-specific test binary:
+//! It should be noted that the local registry will inherit the global registry when
+//! it is created, which means that the inherited part can be shared. When you remove
+//! a global fail point action from the local registry, it will affect all threads
+//! using this fail point.
 //!
-//! ```toml
-//! [[test]]
-//! name = "failpoints"
-//! path = "tests/failpoints/mod.rs"
-//! required-features = ["fail/failpoints"]
+//! Here's a example to show the inheritance process：
+//!
+//! ```rust
+//! fail::setup();
+//! fail::cfg("p1", "sleep(100)").unwrap();
+//! println!("Global registry: {:?}", fail::list());
+//! {
+//!     let local_registry = fail::new_fail_group();
+//!     local_registry.register_current();
+//!     fail::cfg("p0", "pause").unwrap();
+//!     println!("Local registry: {:?}", fail::list());
+//!     local_registry.cleanup();
+//!     println!("Local registry: {:?}", fail::list());
+//!     local_registry.deregister_current();
+//! }
+//! println!("Global registry: {:?}", fail::list());
+//! ```
+//! When the example is run normally it prints out the contents of the registry used
+//! at the time.
+//!
+//! ```sh
+//! FAILPOINTS=p0=return cargo run --features fail/failpoints
+//!     Finished dev [unoptimized + debuginfo] target(s) in 0.01s
+//!      Running `target/debug/failpointtest`
+//! Global registry: [("p1", "sleep(100)"), ("p0", "return")]
+//! Local registry: [("p1", "sleep(100)"), ("p0", "pause")]
+//! Local registry: []
+//! Global registry: [("p1", "sleep(100)"), ("p0", "return")]
 //! ```
 //!
+//! In this example, program update global registry with environment variable first.
+//! Then config "p1" with "sleep(100)" in global registry because up to now, it has not
+//! been bound to a local registry. After that, we create a new fail group and the
+//! registry is also replaced with a local registry correspondingly. Finally, we print
+//! out the global registry to show that the operations of the two registries do not
+//! affect each other.
 //!
 //! ## Early return
 //!
@@ -131,7 +166,7 @@
 //! function we used earlier to return a `Result`:
 //!
 //! ```rust
-//! use fail::{fail_point, FailScenario};
+//! use fail::fail_point;
 //! use std::io;
 //!
 //! fn do_fallible_work() -> io::Result<()> {
@@ -142,9 +177,9 @@
 //! }
 //!
 //! fn main() -> io::Result<()> {
-//!     let scenario = FailScenario::setup();
+//!     fail::setup();
 //!     do_fallible_work()?;
-//!     scenario.teardown();
+//!     fail::teardown();
 //!     println!("done");
 //!     Ok(())
 //! }
@@ -230,7 +265,7 @@ use std::env::VarError;
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, TryLockError};
+use std::sync::{Arc, Condvar, Mutex, RwLock, TryLockError};
 use std::time::{Duration, Instant};
 use std::{env, thread};
 
@@ -288,6 +323,19 @@ struct Action {
     task: Task,
     freq: f32,
     count: Option<AtomicUsize>,
+}
+
+impl Clone for Action {
+    fn clone(&self) -> Self {
+        Action {
+            count: self
+                .count
+                .as_ref()
+                .map(|c| AtomicUsize::new(c.load(Ordering::Relaxed))),
+            task: self.task.clone(),
+            freq: self.freq,
+        }
+    }
 }
 
 impl PartialEq for Action {
@@ -421,7 +469,7 @@ impl FromStr for Action {
 }
 
 #[cfg_attr(feature = "cargo-clippy", allow(clippy::mutex_atomic))]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct FailPoint {
     pause: Mutex<bool>,
     pause_notifier: Condvar,
@@ -429,15 +477,20 @@ struct FailPoint {
     actions_str: RwLock<String>,
 }
 
+impl Clone for FailPoint {
+    fn clone(&self) -> Self {
+        FailPoint {
+            actions: RwLock::new(self.actions.read().unwrap().clone()),
+            actions_str: RwLock::new(self.actions_str.read().unwrap().clone()),
+            ..Default::default()
+        }
+    }
+}
+
 #[cfg_attr(feature = "cargo-clippy", allow(clippy::mutex_atomic))]
 impl FailPoint {
     fn new() -> FailPoint {
-        FailPoint {
-            pause: Mutex::new(false),
-            pause_notifier: Condvar::new(),
-            actions: RwLock::default(),
-            actions_str: RwLock::default(),
-        }
+        FailPoint::default()
     }
 
     fn set_actions(&self, actions_str: &str, actions: Vec<Action>) {
@@ -509,98 +562,122 @@ impl FailPoint {
 /// Registry with failpoints configuration.
 type Registry = HashMap<String, Arc<FailPoint>>;
 
-#[derive(Debug, Default)]
-struct FailPointRegistry {
+/// Fail point registry. Threads bound to the same registry share the same
+/// failpoints configuration.
+#[derive(Debug, Default, Clone)]
+pub struct FailPointRegistry {
     // TODO: remove rwlock or store *mut FailPoint
-    registry: RwLock<Registry>,
+    registry: Arc<RwLock<Registry>>,
+}
+
+/// Generate a new failpoint registry. The new registry will inherit the
+/// global failpoints configuration.
+///
+/// Each thread should be bound to exact one registry. Threads bound to the
+/// same registry share the same failpoints configuration.
+pub fn new_fail_group() -> FailPointRegistry {
+    let registry = REGISTRY_GLOBAL.registry.read().unwrap();
+    let mut new_registry = Registry::new();
+    for (name, failpoint) in registry.iter() {
+        new_registry.insert(name.clone(), Arc::new(FailPoint::clone(failpoint)));
+    }
+    FailPointRegistry {
+        registry: Arc::new(RwLock::new(new_registry)),
+    }
+}
+
+impl FailPointRegistry {
+    /// Register the current thread to this failpoints registry.
+    pub fn register_current(&self) {
+        let id = thread::current().id();
+        REGISTRY_GROUP
+            .write()
+            .unwrap()
+            .insert(id, self.registry.clone());
+    }
+
+    /// Deregister the current thread to this failpoints registry.
+    pub fn deregister_current(&self) {
+        let id = thread::current().id();
+        REGISTRY_GROUP.write().unwrap().remove(&id);
+    }
+
+    /// Clean up registered fail points in this registry.
+    pub fn cleanup(&self) {
+        let mut registry = self.registry.write().unwrap();
+        cleanup(&mut registry);
+    }
 }
 
 lazy_static::lazy_static! {
-    static ref REGISTRY: FailPointRegistry = FailPointRegistry::default();
-    static ref SCENARIO: Mutex<&'static FailPointRegistry> = Mutex::new(&REGISTRY);
+    static ref REGISTRY_GROUP: RwLock<HashMap<thread::ThreadId, Arc<RwLock<Registry>>>> = Default::default();
+    static ref REGISTRY_GLOBAL: FailPointRegistry = Default::default();
 }
 
-/// Test scenario with configured fail points.
-#[derive(Debug)]
-pub struct FailScenario<'a> {
-    scenario_guard: MutexGuard<'a, &'static FailPointRegistry>,
-}
+/// Set up the global fail points registry.
+///
+/// Configures global fail points specified in the `FAILPOINTS` environment variable.
+/// It does not otherwise change any existing fail point configuration.
+///
+/// The format of `FAILPOINTS` is `failpoint=actions;...`, where
+/// `failpoint` is the name of the fail point. For more information
+/// about fail point actions see the [`cfg`](fn.cfg.html) function and
+/// the [`fail_point`](macro.fail_point.html) macro.
+///
+/// `FAILPOINTS` may configure fail points that are not actually defined. In
+/// this case the configuration has no effect.
+///
+/// This function should generally be called prior to running a test with fail
+/// points, and afterward paired with [`teardown`](#method.teardown).
+///
+/// # Panics
+///
+/// Panics if an action is not formatted correctly.
+pub fn setup() {
+    let mut registry = REGISTRY_GLOBAL.registry.write().unwrap();
+    cleanup(&mut registry);
 
-impl<'a> FailScenario<'a> {
-    /// Set up the system for a fail points scenario.
-    ///
-    /// Configures all fail points specified in the `FAILPOINTS` environment variable.
-    /// It does not otherwise change any existing fail point configuration.
-    ///
-    /// The format of `FAILPOINTS` is `failpoint=actions;...`, where
-    /// `failpoint` is the name of the fail point. For more information
-    /// about fail point actions see the [`cfg`](fn.cfg.html) function and
-    /// the [`fail_point`](macro.fail_point.html) macro.
-    ///
-    /// `FAILPOINTS` may configure fail points that are not actually defined. In
-    /// this case the configuration has no effect.
-    ///
-    /// This function should generally be called prior to running a test with fail
-    /// points, and afterward paired with [`teardown`](#method.teardown).
-    ///
-    /// # Panics
-    ///
-    /// Panics if an action is not formatted correctly.
-    pub fn setup() -> Self {
-        // Cleanup first, in case of previous failed/panic'ed test scenarios.
-        let scenario_guard = SCENARIO.lock().unwrap_or_else(|e| e.into_inner());
-        let mut registry = scenario_guard.registry.write().unwrap();
-        Self::cleanup(&mut registry);
-
-        let failpoints = match env::var("FAILPOINTS") {
-            Ok(s) => s,
-            Err(VarError::NotPresent) => return Self { scenario_guard },
-            Err(e) => panic!("invalid failpoints: {:?}", e),
-        };
-        for mut cfg in failpoints.trim().split(';') {
-            cfg = cfg.trim();
-            if cfg.is_empty() {
-                continue;
-            }
-            let (name, order) = partition(cfg, '=');
-            match order {
-                None => panic!("invalid failpoint: {:?}", cfg),
-                Some(order) => {
-                    if let Err(e) = set(&mut registry, name.to_owned(), order) {
-                        panic!("unable to configure failpoint \"{}\": {}", name, e);
-                    }
+    let failpoints = match env::var("FAILPOINTS") {
+        Ok(s) => s,
+        Err(VarError::NotPresent) => return,
+        Err(e) => panic!("invalid failpoints: {:?}", e),
+    };
+    for mut cfg in failpoints.trim().split(';') {
+        cfg = cfg.trim();
+        if cfg.is_empty() {
+            continue;
+        }
+        let (name, order) = partition(cfg, '=');
+        match order {
+            None => panic!("invalid failpoint: {:?}", cfg),
+            Some(order) => {
+                if let Err(e) = set(&mut registry, name.to_owned(), order) {
+                    panic!("unable to configure failpoint \"{}\": {}", name, e);
                 }
             }
         }
-        Self { scenario_guard }
-    }
-
-    /// Tear down the fail point system.
-    ///
-    /// Clears the configuration of all fail points. Any paused fail
-    /// points will be notified before they are deactivated.
-    ///
-    /// This function should generally be called after running a test with fail points.
-    /// Calling `teardown` without previously calling `setup` results in a no-op.
-    pub fn teardown(self) {
-        drop(self)
-    }
-
-    /// Clean all registered fail points.
-    fn cleanup(registry: &mut std::sync::RwLockWriteGuard<'a, Registry>) {
-        for p in registry.values() {
-            // wake up all pause failpoint.
-            p.set_actions("", vec![]);
-        }
-        registry.clear();
     }
 }
 
-impl<'a> Drop for FailScenario<'a> {
-    fn drop(&mut self) {
-        let mut registry = self.scenario_guard.registry.write().unwrap();
-        Self::cleanup(&mut registry)
+/// Tear down the global fail points registry.
+///
+/// Clears the configuration of global fail points. Any paused fail
+/// points will be notified before they are deactivated.
+///
+/// This function should generally be called after running a test with fail points.
+/// Calling `teardown` without previously calling `setup` results in a no-op.
+pub fn teardown() {
+    let mut registry = REGISTRY_GLOBAL.registry.write().unwrap();
+    cleanup(&mut registry);
+}
+
+/// Clean all registered fail points.
+fn cleanup(registry: &mut std::sync::RwLockWriteGuard<Registry>) {
+    for p in registry.values() {
+        // wake up all pause failpoint.
+        p.set_actions("", vec![]);
     }
+    registry.clear();
 }
 
 /// Returns whether code generation for failpoints is enabled.
@@ -612,11 +689,22 @@ pub const fn has_failpoints() -> bool {
     cfg!(feature = "failpoints")
 }
 
-/// Get all registered fail points.
+/// Get all registered fail points in current registry.
+///
+/// If current thread is not bound to any local registry. It will try to
+/// get from the global registry.
 ///
 /// Return a vector of `(name, actions)` pairs.
 pub fn list() -> Vec<(String, String)> {
-    let registry = REGISTRY.registry.read().unwrap();
+    let id = thread::current().id();
+    let group = REGISTRY_GROUP.read().unwrap();
+
+    let registry = group
+        .get(&id)
+        .unwrap_or(&REGISTRY_GLOBAL.registry)
+        .read()
+        .unwrap();
+
     registry
         .iter()
         .map(|(name, fp)| (name.to_string(), fp.actions_str.read().unwrap().clone()))
@@ -625,8 +713,15 @@ pub fn list() -> Vec<(String, String)> {
 
 #[doc(hidden)]
 pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
+    let id = thread::current().id();
+    let group = REGISTRY_GROUP.read().unwrap();
+
     let p = {
-        let registry = REGISTRY.registry.read().unwrap();
+        let registry = group
+            .get(&id)
+            .unwrap_or(&REGISTRY_GLOBAL.registry)
+            .read()
+            .unwrap();
         match registry.get(name) {
             None => return None,
             Some(p) => p.clone(),
@@ -635,7 +730,7 @@ pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
     p.eval(name).map(f)
 }
 
-/// Configure the actions for a fail point at runtime.
+/// Configure the actions for a fail point in current registry at runtime.
 ///
 /// Each fail point can be configured with a series of actions, specified by the
 /// `actions` argument. The format of `actions` is `action[->action...]`. When
@@ -666,11 +761,18 @@ pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
 /// A call to `cfg` with a particular fail point name overwrites any existing actions for
 /// that fail point, including those set via the `FAILPOINTS` environment variable.
 pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
-    let mut registry = REGISTRY.registry.write().unwrap();
+    let id = thread::current().id();
+    let group = REGISTRY_GROUP.read().unwrap();
+    let mut registry = group
+        .get(&id)
+        .unwrap_or(&REGISTRY_GLOBAL.registry)
+        .write()
+        .unwrap();
+
     set(&mut registry, name.into(), actions)
 }
 
-/// Configure the actions for a fail point at runtime.
+/// Configure the actions for a fail point in current registry at runtime.
 ///
 /// Each fail point can be configured by a callback. Process will call this callback function
 /// when it meet this fail-point.
@@ -679,7 +781,14 @@ where
     S: Into<String>,
     F: Fn() + Send + Sync + 'static,
 {
-    let mut registry = REGISTRY.registry.write().unwrap();
+    let id = thread::current().id();
+    let group = REGISTRY_GROUP.read().unwrap();
+    let mut registry = group
+        .get(&id)
+        .unwrap_or(&REGISTRY_GLOBAL.registry)
+        .write()
+        .unwrap();
+
     let p = registry
         .entry(name.into())
         .or_insert_with(|| Arc::new(FailPoint::new()));
@@ -691,9 +800,17 @@ where
 
 /// Remove a fail point.
 ///
-/// If the fail point doesn't exist, nothing will happen.
+/// If the local registry doesn't exist, it will try to delete the corresponding
+/// action in the global registry.
 pub fn remove<S: AsRef<str>>(name: S) {
-    let mut registry = REGISTRY.registry.write().unwrap();
+    let id = thread::current().id();
+    let group = REGISTRY_GROUP.read().unwrap();
+    let mut registry = group
+        .get(&id)
+        .unwrap_or(&REGISTRY_GLOBAL.registry)
+        .write()
+        .unwrap();
+
     if let Some(p) = registry.remove(name.as_ref()) {
         // wake up all pause failpoint.
         p.set_actions("", vec![]);
@@ -990,6 +1107,48 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_multiple_threads() {
+        let local_registry = new_fail_group();
+        local_registry.register_current();
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            local_registry.register_current();
+            cfg("thread_point", "sleep(10)").unwrap();
+            tx.send(()).unwrap();
+        });
+        rx.recv().unwrap();
+        let l = list();
+        assert!(l
+            .iter()
+            .find(|&x| x == &("thread_point".to_owned(), "sleep(10)".to_owned()))
+            .is_some());
+
+        let (tx, rx) = mpsc::channel();
+        let t = thread::spawn(move || {
+            let local_registry = new_fail_group();
+            local_registry.register_current();
+            cfg("thread_point", "panic").unwrap();
+            let l = list();
+            assert!(l
+                .iter()
+                .find(|&x| x == &("thread_point".to_owned(), "panic".to_owned()))
+                .is_some());
+            rx.recv().unwrap();
+            local_registry.cleanup();
+            let l = list();
+            assert!(l.is_empty());
+        });
+
+        tx.send(()).unwrap();
+        let l = list();
+        assert!(l
+            .iter()
+            .find(|&x| x == &("thread_point".to_owned(), "panic".to_owned()))
+            .is_none());
+        t.join().unwrap();
+    }
+
     // This case should be tested as integration case, but when calling `teardown` other cases
     // like `test_pause` maybe also affected, so it's better keep it here.
     #[test]
@@ -1007,7 +1166,7 @@ mod tests {
             "FAILPOINTS",
             "setup_and_teardown1=return;setup_and_teardown2=pause;",
         );
-        let scenario = FailScenario::setup();
+        setup();
         assert_eq!(f1(), 1);
 
         let (tx, rx) = mpsc::channel();
@@ -1016,7 +1175,7 @@ mod tests {
         });
         assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
 
-        scenario.teardown();
+        teardown();
         assert_eq!(rx.recv_timeout(Duration::from_millis(500)).unwrap(), 0);
         assert_eq!(f1(), 0);
     }
