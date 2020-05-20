@@ -628,7 +628,7 @@ lazy_static::lazy_static! {
 /// this case the configuration has no effect.
 ///
 /// This function should generally be called prior to running a test with fail
-/// points, and afterward paired with [`teardown`](#method.teardown).
+/// points, and afterward paired with [`teardown`](fn.teardown.html).
 ///
 /// # Panics
 ///
