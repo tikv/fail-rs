@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: 
+    - master
+  schedule:
+  - cron: '0 22 * * *'
+
+env:
+  RUST_BACKTRACE: 1
+  RUSTFLAGS: "--deny=warnings"
+
+jobs:
+  Linux-Stable:
+    name: Linux-Stable
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - run: cargo fmt -- --check
+    - run: cargo clippy -- -D clippy::all
+    - run: cargo test --all -- --nocapture
+    - run: cargo test --all --all-features -- --nocapture
+    - run: cargo bench --all -- --test
+    - run: cargo bench --all --all-features -- --test
+
+  Linux-Nightly:
+    name: Linux-Nightly
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - run: rustup default nightly
+    - run: cargo test --all -- --nocapture
+    - run: cargo test --all --all-features -- --nocapture
+    - run: cargo bench --all -- --test
+    - run: cargo bench --all --all-features -- --test
+
+  Mac-Stable:
+    name: Mac
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v2
+    - run: cargo test --all -- --nocapture
+    - run: cargo test --all --all-features -- --nocapture
+    - run: cargo bench --all -- --test
+    - run: cargo bench --all --all-features -- --test
+
+  Win-Stable:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v2
+    - run: cargo test --all -- --nocapture
+    - run: cargo test --all --all-features -- --nocapture
+    - run: cargo bench --all -- --test
+    - run: cargo bench --all --all-features -- --test

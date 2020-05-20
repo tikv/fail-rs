@@ -21,9 +21,5 @@ rand = "0.7"
 [features]
 failpoints = []
 
-[badges]
-travis-ci = { repository = "tikv/fail-rs" }
-appveyor = { repository = "busyjay/fail-rs" }
-
 [package.metadata.docs.rs]
 all-features = true

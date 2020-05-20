@@ -1,6 +1,6 @@
 # fail-rs
 
-[![Build Status](https://travis-ci.org/tikv/fail-rs.svg?branch=master)](https://travis-ci.org/tikv/fail-rs)
+[![CI](https://github.com/tikv/fail-rs/workflows/CI/badge.svg)](https://github.com/tikv/fail-rs/actions)
 [![Crates.io](https://img.shields.io/crates/v/fail.svg?maxAge=2592000)](https://crates.io/crates/fail)
 
 [Documentation](https://docs.rs/fail).
