@@ -19,32 +19,26 @@ fn test_pause() {
 
     fail::cfg("pause", "pause").unwrap();
     let (tx, rx) = mpsc::channel();
-    // control `f()` is executed before next failpoint config
-    let (tx_before, rx_before) = mpsc::channel();
     let thread_registry = local_registry.clone();
     thread::spawn(move || {
         thread_registry.register_current();
         // pause
-        tx_before.send(()).unwrap();
         tx.send(f()).unwrap();
         // woken up by new order pause, and then pause again.
-        tx_before.send(()).unwrap();
         tx.send(f()).unwrap();
         // woken up by remove, and then quit immediately.
         tx.send(f()).unwrap();
     });
 
-    rx_before.recv().unwrap();
-    assert!(rx.recv_timeout(Duration::from_millis(2000)).is_err());
+    assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
     fail::cfg("pause", "pause").unwrap();
-    rx.recv_timeout(Duration::from_millis(500)).unwrap();
+    rx.recv_timeout(Duration::from_millis(100)).unwrap();
 
-    rx_before.recv().unwrap();
-    assert!(rx.recv_timeout(Duration::from_millis(2000)).is_err());
+    assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
     fail::remove("pause");
 
-    rx.recv_timeout(Duration::from_millis(500)).unwrap();
-    rx.recv_timeout(Duration::from_millis(500)).unwrap();
+    rx.recv_timeout(Duration::from_millis(100)).unwrap();
+    rx.recv_timeout(Duration::from_millis(100)).unwrap();
 }
 
 #[test]

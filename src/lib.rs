@@ -714,9 +714,9 @@ pub fn list() -> Vec<(String, String)> {
 #[doc(hidden)]
 pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
     let id = thread::current().id();
-    let group = REGISTRY_GROUP.read().unwrap();
 
     let p = {
+        let group = REGISTRY_GROUP.read().unwrap();
         let registry = group
             .get(&id)
             .unwrap_or(&REGISTRY_GLOBAL.registry)
@@ -761,13 +761,13 @@ pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
 /// A call to `cfg` with a particular fail point name overwrites any existing actions for
 /// that fail point, including those set via the `FAILPOINTS` environment variable.
 pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
-    let id = thread::current().id();
-    let group = REGISTRY_GROUP.read().unwrap();
-    let mut registry = group
-        .get(&id)
-        .unwrap_or(&REGISTRY_GLOBAL.registry)
-        .write()
-        .unwrap();
+    let registry = {
+        let group = REGISTRY_GROUP.read().unwrap();
+        let id = thread::current().id();
+        group.get(&id).unwrap_or(&REGISTRY_GLOBAL.registry).clone()
+    };
+
+    let mut registry = registry.write().unwrap();
 
     set(&mut registry, name.into(), actions)
 }
@@ -781,13 +781,13 @@ where
     S: Into<String>,
     F: Fn() + Send + Sync + 'static,
 {
-    let id = thread::current().id();
-    let group = REGISTRY_GROUP.read().unwrap();
-    let mut registry = group
-        .get(&id)
-        .unwrap_or(&REGISTRY_GLOBAL.registry)
-        .write()
-        .unwrap();
+    let registry = {
+        let group = REGISTRY_GROUP.read().unwrap();
+        let id = thread::current().id();
+        group.get(&id).unwrap_or(&REGISTRY_GLOBAL.registry).clone()
+    };
+
+    let mut registry = registry.write().unwrap();
 
     let p = registry
         .entry(name.into())
@@ -803,13 +803,13 @@ where
 /// If the local registry doesn't exist, it will try to delete the corresponding
 /// action in the global registry.
 pub fn remove<S: AsRef<str>>(name: S) {
-    let id = thread::current().id();
-    let group = REGISTRY_GROUP.read().unwrap();
-    let mut registry = group
-        .get(&id)
-        .unwrap_or(&REGISTRY_GLOBAL.registry)
-        .write()
-        .unwrap();
+    let registry = {
+        let group = REGISTRY_GROUP.read().unwrap();
+        let id = thread::current().id();
+        group.get(&id).unwrap_or(&REGISTRY_GLOBAL.registry).clone()
+    };
+
+    let mut registry = registry.write().unwrap();
 
     if let Some(p) = registry.remove(name.as_ref()) {
         // wake up all pause failpoint.
