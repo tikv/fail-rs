@@ -105,7 +105,7 @@
 //!
 //!     do_fallible_work();
 //!
-//!     local_registry.cleanup();
+//!     local_registry.teardown();
 //! }
 //! ```
 //!
@@ -125,7 +125,7 @@
 //!     local_registry.register_current();
 //!     fail::cfg("p0", "pause").unwrap();
 //!     println!("Local registry: {:?}", fail::list());
-//!     local_registry.cleanup();
+//!     local_registry.teardown();
 //!     println!("Local registry: {:?}", fail::list());
 //!     local_registry.deregister_current();
 //! }
@@ -603,7 +603,7 @@ impl FailPointRegistry {
     }
 
     /// Clean up registered fail points in this registry.
-    pub fn cleanup(&self) {
+    pub fn teardown(&self) {
         let mut registry = self.registry.write().unwrap();
         cleanup(&mut registry);
     }
@@ -1105,48 +1105,6 @@ mod tests {
         for case in fail_cases {
             assert!(case.parse::<Action>().is_err());
         }
-    }
-
-    #[test]
-    fn test_multiple_threads() {
-        let local_registry = new_fail_group();
-        local_registry.register_current();
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            local_registry.register_current();
-            cfg("thread_point", "sleep(10)").unwrap();
-            tx.send(()).unwrap();
-        });
-        rx.recv().unwrap();
-        let l = list();
-        assert!(l
-            .iter()
-            .find(|&x| x == &("thread_point".to_owned(), "sleep(10)".to_owned()))
-            .is_some());
-
-        let (tx, rx) = mpsc::channel();
-        let t = thread::spawn(move || {
-            let local_registry = new_fail_group();
-            local_registry.register_current();
-            cfg("thread_point", "panic").unwrap();
-            let l = list();
-            assert!(l
-                .iter()
-                .find(|&x| x == &("thread_point".to_owned(), "panic".to_owned()))
-                .is_some());
-            rx.recv().unwrap();
-            local_registry.cleanup();
-            let l = list();
-            assert!(l.is_empty());
-        });
-
-        tx.send(()).unwrap();
-        let l = list();
-        assert!(l
-            .iter()
-            .find(|&x| x == &("thread_point".to_owned(), "panic".to_owned()))
-            .is_none());
-        t.join().unwrap();
     }
 
     // This case should be tested as integration case, but when calling `teardown` other cases

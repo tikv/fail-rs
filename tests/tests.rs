@@ -282,7 +282,7 @@ fn test_multiple_threads_cleanup() {
                 && l.len() == 1
         );
         rx.recv().unwrap();
-        local_registry.cleanup();
+        local_registry.teardown();
         let l = fail::list();
         assert!(l.is_empty());
     });
