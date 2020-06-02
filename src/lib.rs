@@ -99,7 +99,7 @@
 //! #[test]
 //! #[should_panic]
 //! fn test_fallible_work() {
-//!     let local_registry = fail::new_fail_group();
+//!     let local_registry = fail::create_registry();
 //!     local_registry.register_current();
 //!     fail::cfg("read-dir", "panic").unwrap();
 //!
@@ -109,19 +109,18 @@
 //! }
 //! ```
 //!
-//! It should be noted that the local registry will inherit the global registry when
-//! it is created, which means that the inherited part can be shared. When you remove
-//! a global fail point action from the local registry, it will affect all threads
-//! using this fail point.
+//! It should be noted that the local registry will will overwrite the global registry
+//! if you register the current thread here. This means that the current thread can only
+//! use the fail points configuration of the local registry after registration.
 //!
-//! Here's a example to show the inheritance process：
+//! Here's a example to show the process：
 //!
 //! ```rust
 //! fail::setup();
 //! fail::cfg("p1", "sleep(100)").unwrap();
 //! println!("Global registry: {:?}", fail::list());
 //! {
-//!     let local_registry = fail::new_fail_group();
+//!     let local_registry = fail::create_registry();
 //!     local_registry.register_current();
 //!     fail::cfg("p0", "pause").unwrap();
 //!     println!("Local registry: {:?}", fail::list());
@@ -138,10 +137,10 @@
 //! FAILPOINTS=p0=return cargo run --features fail/failpoints
 //!     Finished dev [unoptimized + debuginfo] target(s) in 0.01s
 //!      Running `target/debug/failpointtest`
-//! Global registry: [("p1", "sleep(100)"), ("p0", "return")]
-//! Local registry: [("p1", "sleep(100)"), ("p0", "pause")]
+//! Global registry: [("p1", "sleep(100)")]
+//! Local registry: [("p0", "pause")]
 //! Local registry: []
-//! Global registry: [("p1", "sleep(100)"), ("p0", "return")]
+//! Global registry: [("p1", "sleep(100)")]
 //! ```
 //!
 //! In this example, program update global registry with environment variable first.
@@ -325,19 +324,6 @@ struct Action {
     count: Option<AtomicUsize>,
 }
 
-impl Clone for Action {
-    fn clone(&self) -> Self {
-        Action {
-            count: self
-                .count
-                .as_ref()
-                .map(|c| AtomicUsize::new(c.load(Ordering::Relaxed))),
-            task: self.task.clone(),
-            freq: self.freq,
-        }
-    }
-}
-
 impl PartialEq for Action {
     fn eq(&self, hs: &Action) -> bool {
         if self.task != hs.task || self.freq != hs.freq {
@@ -477,16 +463,6 @@ struct FailPoint {
     actions_str: RwLock<String>,
 }
 
-impl Clone for FailPoint {
-    fn clone(&self) -> Self {
-        FailPoint {
-            actions: RwLock::new(self.actions.read().unwrap().clone()),
-            actions_str: RwLock::new(self.actions_str.read().unwrap().clone()),
-            ..Default::default()
-        }
-    }
-}
-
 #[cfg_attr(feature = "cargo-clippy", allow(clippy::mutex_atomic))]
 impl FailPoint {
     fn new() -> FailPoint {
@@ -575,25 +551,26 @@ pub struct FailPointRegistry {
 ///
 /// Each thread should be bound to exact one registry. Threads bound to the
 /// same registry share the same failpoints configuration.
-pub fn new_fail_group() -> FailPointRegistry {
-    let registry = REGISTRY_GLOBAL.registry.read().unwrap();
-    let mut new_registry = Registry::new();
-    for (name, failpoint) in registry.iter() {
-        new_registry.insert(name.clone(), Arc::new(FailPoint::clone(failpoint)));
-    }
+pub fn create_registry() -> FailPointRegistry {
     FailPointRegistry {
-        registry: Arc::new(RwLock::new(new_registry)),
+        registry: Arc::new(RwLock::new(Registry::new())),
     }
 }
 
 impl FailPointRegistry {
     /// Register the current thread to this failpoints registry.
-    pub fn register_current(&self) {
+    pub fn register_current(&self) -> Result<(), String> {
         let id = thread::current().id();
-        REGISTRY_GROUP
+        let ret = REGISTRY_GROUP
             .write()
             .unwrap()
             .insert(id, self.registry.clone());
+
+        if ret.is_some() {
+            Err("current thread has been registered with one registry".to_owned())
+        } else {
+            Ok(())
+        }
     }
 
     /// Deregister the current thread to this failpoints registry.
@@ -696,14 +673,13 @@ pub const fn has_failpoints() -> bool {
 ///
 /// Return a vector of `(name, actions)` pairs.
 pub fn list() -> Vec<(String, String)> {
-    let id = thread::current().id();
-    let group = REGISTRY_GROUP.read().unwrap();
+    let registry = {
+        let group = REGISTRY_GROUP.read().unwrap();
+        let id = thread::current().id();
+        group.get(&id).unwrap_or(&REGISTRY_GLOBAL.registry).clone()
+    };
 
-    let registry = group
-        .get(&id)
-        .unwrap_or(&REGISTRY_GLOBAL.registry)
-        .read()
-        .unwrap();
+    let registry = registry.read().unwrap();
 
     registry
         .iter()
@@ -713,15 +689,15 @@ pub fn list() -> Vec<(String, String)> {
 
 #[doc(hidden)]
 pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
-    let id = thread::current().id();
-
     let p = {
-        let group = REGISTRY_GROUP.read().unwrap();
-        let registry = group
-            .get(&id)
-            .unwrap_or(&REGISTRY_GLOBAL.registry)
-            .read()
-            .unwrap();
+        let registry = {
+            let group = REGISTRY_GROUP.read().unwrap();
+            let id = thread::current().id();
+            group.get(&id).unwrap_or(&REGISTRY_GLOBAL.registry).clone()
+        };
+
+        let registry = registry.read().unwrap();
+
         match registry.get(name) {
             None => return None,
             Some(p) => p.clone(),
@@ -1125,6 +1101,28 @@ mod tests {
             "setup_and_teardown1=return;setup_and_teardown2=pause;",
         );
         setup();
+
+        let group = create_registry();
+        let handler = thread::spawn(move || {
+            group.register_current().unwrap();
+            cfg("setup_and_teardown1", "panic").unwrap();
+            cfg("setup_and_teardown2", "panic").unwrap();
+            let l = list();
+            assert!(
+                l.iter()
+                    .find(|&x| x == &("setup_and_teardown1".to_owned(), "panic".to_owned()))
+                    .is_some()
+                    && l.iter()
+                        .find(|&x| x == &("setup_and_teardown2".to_owned(), "panic".to_owned()))
+                        .is_some()
+                    && l.len() == 2
+            );
+            remove("setup_and_teardown2");
+            let l = list();
+            assert!(l.len() == 1);
+        });
+        handler.join().unwrap();
+
         assert_eq!(f1(), 1);
 
         let (tx, rx) = mpsc::channel();
