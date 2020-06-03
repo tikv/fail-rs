@@ -10,7 +10,7 @@ use fail::fail_point;
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_pause() {
-    let local_registry = fail::create_registry();
+    let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current().unwrap();
     let f = || {
         fail_point!("pause");
@@ -43,7 +43,7 @@ fn test_pause() {
 
 #[test]
 fn test_off() {
-    let local_registry = fail::create_registry();
+    let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current().unwrap();
 
     let f = || {
@@ -59,7 +59,7 @@ fn test_off() {
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_return() {
-    let local_registry = fail::create_registry();
+    let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current().unwrap();
 
     let f = || {
@@ -79,7 +79,7 @@ fn test_return() {
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_sleep() {
-    let local_registry = fail::create_registry();
+    let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current().unwrap();
 
     let f = || {
@@ -99,7 +99,7 @@ fn test_sleep() {
 #[should_panic]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_panic() {
-    let local_registry = fail::create_registry();
+    let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current().unwrap();
 
     let f = || {
@@ -112,7 +112,7 @@ fn test_panic() {
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_print() {
-    let local_registry = fail::create_registry();
+    let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current().unwrap();
 
     struct LogCollector(Arc<Mutex<Vec<String>>>);
@@ -148,7 +148,7 @@ fn test_print() {
 
 #[test]
 fn test_yield() {
-    let local_registry = fail::create_registry();
+    let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current().unwrap();
 
     let f = || {
@@ -161,7 +161,7 @@ fn test_yield() {
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_callback() {
-    let local_registry = fail::create_registry();
+    let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current().unwrap();
 
     let f1 = || {
@@ -185,7 +185,7 @@ fn test_callback() {
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_delay() {
-    let local_registry = fail::create_registry();
+    let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current().unwrap();
 
     let f = || fail_point!("delay");
@@ -198,7 +198,7 @@ fn test_delay() {
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_freq_and_count() {
-    let local_registry = fail::create_registry();
+    let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current().unwrap();
 
     let f = || {
@@ -222,7 +222,7 @@ fn test_freq_and_count() {
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_condition() {
-    let local_registry = fail::create_registry();
+    let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current().unwrap();
 
     let f = |_enabled| {
@@ -239,7 +239,7 @@ fn test_condition() {
 
 #[test]
 fn test_list() {
-    let local_registry = fail::create_registry();
+    let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current().unwrap();
 
     assert!(!fail::list().contains(&("list".to_string(), "off".to_string())));
@@ -251,7 +251,7 @@ fn test_list() {
 
 #[test]
 fn test_multiple_threads_cleanup() {
-    let local_registry = fail::create_registry();
+    let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current().unwrap();
 
     let (tx, rx) = mpsc::channel();
@@ -271,7 +271,7 @@ fn test_multiple_threads_cleanup() {
 
     let (tx, rx) = mpsc::channel();
     let t = thread::spawn(move || {
-        let local_registry = fail::create_registry();
+        let local_registry = fail::FailPointRegistry::new();
         local_registry.register_current().unwrap();
         fail::cfg("thread_point", "panic").unwrap();
         let l = fail::list();

@@ -99,7 +99,7 @@
 //! #[test]
 //! #[should_panic]
 //! fn test_fallible_work() {
-//!     let local_registry = fail::create_registry();
+//!     let local_registry = fail::FailPointRegistry::new();
 //!     local_registry.register_current();
 //!     fail::cfg("read-dir", "panic").unwrap();
 //!
@@ -120,7 +120,7 @@
 //! fail::cfg("p1", "sleep(100)").unwrap();
 //! println!("Global registry: {:?}", fail::list());
 //! {
-//!     let local_registry = fail::create_registry();
+//!     let local_registry = fail::FailPointRegistry::new();
 //!     local_registry.register_current();
 //!     fail::cfg("p0", "pause").unwrap();
 //!     println!("Local registry: {:?}", fail::list());
@@ -546,18 +546,17 @@ pub struct FailPointRegistry {
     registry: Arc<RwLock<Registry>>,
 }
 
-/// Generate a new failpoint registry. The new registry will inherit the
-/// global failpoints configuration.
-///
-/// Each thread should be bound to exact one registry. Threads bound to the
-/// same registry share the same failpoints configuration.
-pub fn create_registry() -> FailPointRegistry {
-    FailPointRegistry {
-        registry: Arc::new(RwLock::new(Registry::new())),
-    }
-}
-
 impl FailPointRegistry {
+    /// Generate a new failpoint registry. The new registry will inherit the
+    /// global failpoints configuration.
+    ///
+    /// Each thread should be bound to exact one registry. Threads bound to the
+    /// same registry share the same failpoints configuration.
+    pub fn new() -> Self {
+        FailPointRegistry {
+            registry: Arc::new(RwLock::new(Registry::new())),
+        }
+    }
     /// Register the current thread to this failpoints registry.
     pub fn register_current(&self) -> Result<(), String> {
         let id = thread::current().id();
@@ -1102,7 +1101,7 @@ mod tests {
         );
         setup();
 
-        let group = create_registry();
+        let group = FailPointRegistry::new();
         let handler = thread::spawn(move || {
             group.register_current().unwrap();
             cfg("setup_and_teardown1", "panic").unwrap();
