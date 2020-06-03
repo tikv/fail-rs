@@ -28,7 +28,7 @@
 //! I/O panic:
 //!
 //! ```rust
-//! use fail::fail_point;
+//! use fail::{fail_point, FailScenario};
 //!
 //! fn do_fallible_work() {
 //!     fail_point!("read-dir");
@@ -36,9 +36,9 @@
 //!     // ... do some work on the directory ...
 //! }
 //!
-//! fail::setup();
+//! let scenario = FailScenario::setup();
 //! do_fallible_work();
-//! fail::teardown();
+//! scenario.teardown();
 //! println!("done");
 //! ```
 //!
@@ -83,7 +83,8 @@
 //! by default. You can pass the setting from environment variables to the global registry.
 //! Sometimes you need different tests to use different registries and don’t want their
 //! behavior to interfere with each other. You can create a local registry and then register
-//! threads that need to share the same registry.
+//! threads that need to share the same registry. Or you can still use `FailScenario` to
+//! sequentially configure different global registry.
 //!
 //! Here's a basic pattern for writing unit tests tests with fail points:
 //!
@@ -116,7 +117,9 @@
 //! Here's a example to show the process：
 //!
 //! ```rust
-//! fail::setup();
+//! use fail::FailScenario;
+//!
+//! let _scenario = FailScenario::setup();
 //! fail::cfg("p1", "sleep(100)").unwrap();
 //! println!("Global registry: {:?}", fail::list());
 //! {
@@ -165,7 +168,7 @@
 //! function we used earlier to return a `Result`:
 //!
 //! ```rust
-//! use fail::fail_point;
+//! use fail::{fail_point, FailScenario};
 //! use std::io;
 //!
 //! fn do_fallible_work() -> io::Result<()> {
@@ -176,9 +179,9 @@
 //! }
 //!
 //! fn main() -> io::Result<()> {
-//!     fail::setup();
+//!     let scenario = FailScenario::setup();
 //!     do_fallible_work()?;
-//!     fail::teardown();
+//!     scenario.teardown();
 //!     println!("done");
 //!     Ok(())
 //! }
@@ -264,6 +267,7 @@ use std::env::VarError;
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::MutexGuard;
 use std::sync::{Arc, Condvar, Mutex, RwLock, TryLockError};
 use std::time::{Duration, Instant};
 use std::{env, thread};
@@ -588,63 +592,81 @@ impl FailPointRegistry {
 lazy_static::lazy_static! {
     static ref REGISTRY_GROUP: RwLock<HashMap<thread::ThreadId, Arc<RwLock<Registry>>>> = Default::default();
     static ref REGISTRY_GLOBAL: FailPointRegistry = Default::default();
+    static ref SCENARIO: Mutex<&'static FailPointRegistry> = Mutex::new(&REGISTRY_GLOBAL);
 }
 
-/// Set up the global fail points registry.
-///
-/// Configures global fail points specified in the `FAILPOINTS` environment variable.
-/// It does not otherwise change any existing fail point configuration.
-///
-/// The format of `FAILPOINTS` is `failpoint=actions;...`, where
-/// `failpoint` is the name of the fail point. For more information
-/// about fail point actions see the [`cfg`](fn.cfg.html) function and
-/// the [`fail_point`](macro.fail_point.html) macro.
-///
-/// `FAILPOINTS` may configure fail points that are not actually defined. In
-/// this case the configuration has no effect.
-///
-/// This function should generally be called prior to running a test with fail
-/// points, and afterward paired with [`teardown`](fn.teardown.html).
-///
-/// # Panics
-///
-/// Panics if an action is not formatted correctly.
-pub fn setup() {
-    let mut registry = REGISTRY_GLOBAL.registry.write().unwrap();
-    cleanup(&mut registry);
+/// Test scenario with configured fail points.
+#[derive(Debug)]
+pub struct FailScenario<'a> {
+    scenario_guard: MutexGuard<'a, &'static FailPointRegistry>,
+}
 
-    let failpoints = match env::var("FAILPOINTS") {
-        Ok(s) => s,
-        Err(VarError::NotPresent) => return,
-        Err(e) => panic!("invalid failpoints: {:?}", e),
-    };
-    for mut cfg in failpoints.trim().split(';') {
-        cfg = cfg.trim();
-        if cfg.is_empty() {
-            continue;
-        }
-        let (name, order) = partition(cfg, '=');
-        match order {
-            None => panic!("invalid failpoint: {:?}", cfg),
-            Some(order) => {
-                if let Err(e) = set(&mut registry, name.to_owned(), order) {
-                    panic!("unable to configure failpoint \"{}\": {}", name, e);
+impl<'a> FailScenario<'a> {
+    /// Set up the system for a fail points scenario.
+    ///
+    /// Configures global fail points specified in the `FAILPOINTS` environment variable.
+    /// It does not otherwise change any existing fail point configuration.
+    ///
+    /// The format of `FAILPOINTS` is `failpoint=actions;...`, where
+    /// `failpoint` is the name of the fail point. For more information
+    /// about fail point actions see the [`cfg`](fn.cfg.html) function and
+    /// the [`fail_point`](macro.fail_point.html) macro.
+    ///
+    /// `FAILPOINTS` may configure fail points that are not actually defined. In
+    /// this case the configuration has no effect.
+    ///
+    /// This function should generally be called prior to running a test with fail
+    /// points, and afterward paired with [`teardown`](#method.teardown).
+    ///
+    /// # Panics
+    ///
+    /// Panics if an action is not formatted correctly.
+    pub fn setup() -> Self {
+        // Cleanup first, in case of previous failed/panic'ed test scenarios.
+        let scenario_guard = SCENARIO.lock().unwrap_or_else(|e| e.into_inner());
+        let mut registry = scenario_guard.registry.write().unwrap();
+        cleanup(&mut registry);
+
+        let failpoints = match env::var("FAILPOINTS") {
+            Ok(s) => s,
+            Err(VarError::NotPresent) => return Self { scenario_guard },
+            Err(e) => panic!("invalid failpoints: {:?}", e),
+        };
+        for mut cfg in failpoints.trim().split(';') {
+            cfg = cfg.trim();
+            if cfg.is_empty() {
+                continue;
+            }
+            let (name, order) = partition(cfg, '=');
+            match order {
+                None => panic!("invalid failpoint: {:?}", cfg),
+                Some(order) => {
+                    if let Err(e) = set(&mut registry, name.to_owned(), order) {
+                        panic!("unable to configure failpoint \"{}\": {}", name, e);
+                    }
                 }
             }
         }
+        Self { scenario_guard }
+    }
+
+    /// Tear down the global fail points registry.
+    ///
+    /// Clears the configuration of global fail points. Any paused fail
+    /// points will be notified before they are deactivated.
+    ///
+    /// This function should generally be called after running a test with fail points.
+    /// Calling `teardown` without previously calling `setup` results in a no-op.
+    pub fn teardown(self) {
+        drop(self);
     }
 }
 
-/// Tear down the global fail points registry.
-///
-/// Clears the configuration of global fail points. Any paused fail
-/// points will be notified before they are deactivated.
-///
-/// This function should generally be called after running a test with fail points.
-/// Calling `teardown` without previously calling `setup` results in a no-op.
-pub fn teardown() {
-    let mut registry = REGISTRY_GLOBAL.registry.write().unwrap();
-    cleanup(&mut registry);
+impl<'a> Drop for FailScenario<'a> {
+    fn drop(&mut self) {
+        let mut registry = self.scenario_guard.registry.write().unwrap();
+        cleanup(&mut registry);
+    }
 }
 
 /// Clean all registered fail points.
@@ -1099,7 +1121,7 @@ mod tests {
             "FAILPOINTS",
             "setup_and_teardown1=return;setup_and_teardown2=pause;",
         );
-        setup();
+        let scenario = FailScenario::setup();
 
         let group = FailPointRegistry::new();
         let handler = thread::spawn(move || {
@@ -1130,7 +1152,7 @@ mod tests {
         });
         assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
 
-        teardown();
+        scenario.teardown();
         assert_eq!(rx.recv_timeout(Duration::from_millis(500)).unwrap(), 0);
         assert_eq!(f1(), 0);
     }
