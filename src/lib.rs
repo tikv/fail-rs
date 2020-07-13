@@ -561,6 +561,18 @@ impl FailPointRegistry {
             registry: Arc::new(RwLock::new(Registry::new())),
         }
     }
+
+    /// Returns the failpoint registry to which the current thread is bound.
+    pub fn current_registry() -> Self {
+        let registry = {
+            let group = REGISTRY_GROUP.read().unwrap();
+            let id = thread::current().id();
+            group.get(&id).unwrap_or(&REGISTRY_GLOBAL.registry).clone()
+        };
+
+        FailPointRegistry { registry }
+    }
+
     /// Register the current thread to this failpoints registry.
     pub fn register_current(&self) -> Result<(), String> {
         let id = thread::current().id();
