@@ -547,7 +547,7 @@ type Registry = HashMap<String, Arc<FailPoint>>;
 #[derive(Debug, Default, Clone)]
 pub struct FailPointRegistry {
     // TODO: remove rwlock or store *mut FailPoint
-    registry: Arc<RwLock<Registry>>,
+    registry: Option<Arc<RwLock<Registry>>>,
 }
 
 impl FailPointRegistry {
@@ -558,52 +558,61 @@ impl FailPointRegistry {
     /// same registry share the same failpoints configuration.
     pub fn new() -> Self {
         FailPointRegistry {
-            registry: Arc::new(RwLock::new(Registry::new())),
+            registry: Some(Arc::new(RwLock::new(Registry::new()))),
         }
     }
 
-    /// Returns the failpoint registry to which the current thread is bound.
+    /// Returns the failpoint registry to which the current thread is bound. If
+    /// `failpoints` feature is not enabled, the internal registry is none.
     pub fn current_registry() -> Self {
-        let registry = {
-            let group = REGISTRY_GROUP.read().unwrap();
-            let id = thread::current().id();
-            group.get(&id).unwrap_or(&REGISTRY_GLOBAL.registry).clone()
-        };
-
-        FailPointRegistry { registry }
+        if cfg!(feature = "failpoints") {
+            let registry = {
+                let group = REGISTRY_GROUP.read().unwrap();
+                let id = thread::current().id();
+                group
+                    .get(&id)
+                    .unwrap_or(REGISTRY_GLOBAL.registry.as_ref().unwrap())
+                    .clone()
+            };
+            FailPointRegistry {
+                registry: Some(registry),
+            }
+        } else {
+            FailPointRegistry { registry: None }
+        }
     }
 
     /// Register the current thread to this failpoints registry.
-    pub fn register_current(&self) -> Result<(), String> {
-        let id = thread::current().id();
-        let ret = REGISTRY_GROUP
-            .write()
-            .unwrap()
-            .insert(id, self.registry.clone());
-
-        if ret.is_some() {
-            Err("current thread has been registered with one registry".to_owned())
-        } else {
-            Ok(())
+    pub fn register_current(&self) {
+        if cfg!(feature = "failpoints") {
+            let id = thread::current().id();
+            REGISTRY_GROUP
+                .write()
+                .unwrap()
+                .insert(id, self.registry.clone().unwrap());
         }
     }
 
     /// Deregister the current thread to this failpoints registry.
     pub fn deregister_current(&self) {
-        let id = thread::current().id();
-        REGISTRY_GROUP.write().unwrap().remove(&id);
+        if cfg!(feature = "failpoints") {
+            let id = thread::current().id();
+            REGISTRY_GROUP.write().unwrap().remove(&id);
+        }
     }
 
     /// Clean up registered fail points in this registry.
     pub fn teardown(&self) {
-        let mut registry = self.registry.write().unwrap();
-        cleanup(&mut registry);
+        if cfg!(feature = "failpoints") {
+            let mut registry = self.registry.as_ref().unwrap().write().unwrap();
+            cleanup(&mut registry);
+        }
     }
 }
 
 lazy_static::lazy_static! {
     static ref REGISTRY_GROUP: RwLock<HashMap<thread::ThreadId, Arc<RwLock<Registry>>>> = Default::default();
-    static ref REGISTRY_GLOBAL: FailPointRegistry = Default::default();
+    static ref REGISTRY_GLOBAL: FailPointRegistry = FailPointRegistry { registry: Some(Default::default()) };
     static ref SCENARIO: Mutex<&'static FailPointRegistry> = Mutex::new(&REGISTRY_GLOBAL);
 }
 
@@ -636,7 +645,7 @@ impl<'a> FailScenario<'a> {
     pub fn setup() -> Self {
         // Cleanup first, in case of previous failed/panic'ed test scenarios.
         let scenario_guard = SCENARIO.lock().unwrap_or_else(|e| e.into_inner());
-        let mut registry = scenario_guard.registry.write().unwrap();
+        let mut registry = scenario_guard.registry.as_ref().unwrap().write().unwrap();
         cleanup(&mut registry);
 
         let failpoints = match env::var("FAILPOINTS") {
@@ -676,7 +685,13 @@ impl<'a> FailScenario<'a> {
 
 impl<'a> Drop for FailScenario<'a> {
     fn drop(&mut self) {
-        let mut registry = self.scenario_guard.registry.write().unwrap();
+        let mut registry = self
+            .scenario_guard
+            .registry
+            .as_ref()
+            .unwrap()
+            .write()
+            .unwrap();
         cleanup(&mut registry);
     }
 }
@@ -709,7 +724,10 @@ pub fn list() -> Vec<(String, String)> {
     let registry = {
         let group = REGISTRY_GROUP.read().unwrap();
         let id = thread::current().id();
-        group.get(&id).unwrap_or(&REGISTRY_GLOBAL.registry).clone()
+        group
+            .get(&id)
+            .unwrap_or(REGISTRY_GLOBAL.registry.as_ref().unwrap())
+            .clone()
     };
 
     let registry = registry.read().unwrap();
@@ -726,7 +744,10 @@ pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
         let registry = {
             let group = REGISTRY_GROUP.read().unwrap();
             let id = thread::current().id();
-            group.get(&id).unwrap_or(&REGISTRY_GLOBAL.registry).clone()
+            group
+                .get(&id)
+                .unwrap_or(REGISTRY_GLOBAL.registry.as_ref().unwrap())
+                .clone()
         };
 
         let registry = registry.read().unwrap();
@@ -773,7 +794,10 @@ pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
     let registry = {
         let group = REGISTRY_GROUP.read().unwrap();
         let id = thread::current().id();
-        group.get(&id).unwrap_or(&REGISTRY_GLOBAL.registry).clone()
+        group
+            .get(&id)
+            .unwrap_or(REGISTRY_GLOBAL.registry.as_ref().unwrap())
+            .clone()
     };
 
     let mut registry = registry.write().unwrap();
@@ -793,7 +817,10 @@ where
     let registry = {
         let group = REGISTRY_GROUP.read().unwrap();
         let id = thread::current().id();
-        group.get(&id).unwrap_or(&REGISTRY_GLOBAL.registry).clone()
+        group
+            .get(&id)
+            .unwrap_or(REGISTRY_GLOBAL.registry.as_ref().unwrap())
+            .clone()
     };
 
     let mut registry = registry.write().unwrap();
@@ -815,7 +842,10 @@ pub fn remove<S: AsRef<str>>(name: S) {
     let registry = {
         let group = REGISTRY_GROUP.read().unwrap();
         let id = thread::current().id();
-        group.get(&id).unwrap_or(&REGISTRY_GLOBAL.registry).clone()
+        group
+            .get(&id)
+            .unwrap_or(REGISTRY_GLOBAL.registry.as_ref().unwrap())
+            .clone()
     };
 
     let mut registry = registry.write().unwrap();
@@ -1137,7 +1167,7 @@ mod tests {
 
         let group = FailPointRegistry::new();
         let handler = thread::spawn(move || {
-            group.register_current().unwrap();
+            group.register_current();
             cfg("setup_and_teardown1", "panic").unwrap();
             cfg("setup_and_teardown2", "panic").unwrap();
             let l = list();

@@ -11,7 +11,7 @@ use fail::fail_point;
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_pause() {
     let local_registry = fail::FailPointRegistry::new();
-    local_registry.register_current().unwrap();
+    local_registry.register_current();
     let f = || {
         fail_point!("pause");
     };
@@ -21,7 +21,7 @@ fn test_pause() {
     let (tx, rx) = mpsc::channel();
     let thread_registry = local_registry.clone();
     thread::spawn(move || {
-        thread_registry.register_current().unwrap();
+        thread_registry.register_current();
         // pause
         tx.send(f()).unwrap();
         // woken up by new order pause, and then pause again.
@@ -42,9 +42,10 @@ fn test_pause() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_off() {
     let local_registry = fail::FailPointRegistry::new();
-    local_registry.register_current().unwrap();
+    local_registry.register_current();
 
     let f = || {
         fail_point!("off", |_| 2);
@@ -60,7 +61,7 @@ fn test_off() {
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_return() {
     let local_registry = fail::FailPointRegistry::new();
-    local_registry.register_current().unwrap();
+    local_registry.register_current();
 
     let f = || {
         fail_point!("return", |s: Option<String>| s
@@ -80,7 +81,7 @@ fn test_return() {
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_sleep() {
     let local_registry = fail::FailPointRegistry::new();
-    local_registry.register_current().unwrap();
+    local_registry.register_current();
 
     let f = || {
         fail_point!("sleep");
@@ -100,7 +101,7 @@ fn test_sleep() {
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_panic() {
     let local_registry = fail::FailPointRegistry::new();
-    local_registry.register_current().unwrap();
+    local_registry.register_current();
 
     let f = || {
         fail_point!("panic");
@@ -113,7 +114,7 @@ fn test_panic() {
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_print() {
     let local_registry = fail::FailPointRegistry::new();
-    local_registry.register_current().unwrap();
+    local_registry.register_current();
 
     struct LogCollector(Arc<Mutex<Vec<String>>>);
     impl log::Log for LogCollector {
@@ -147,9 +148,10 @@ fn test_print() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_yield() {
     let local_registry = fail::FailPointRegistry::new();
-    local_registry.register_current().unwrap();
+    local_registry.register_current();
 
     let f = || {
         fail_point!("yield");
@@ -162,7 +164,7 @@ fn test_yield() {
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_callback() {
     let local_registry = fail::FailPointRegistry::new();
-    local_registry.register_current().unwrap();
+    local_registry.register_current();
 
     let f1 = || {
         fail_point!("cb");
@@ -186,7 +188,7 @@ fn test_callback() {
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_delay() {
     let local_registry = fail::FailPointRegistry::new();
-    local_registry.register_current().unwrap();
+    local_registry.register_current();
 
     let f = || fail_point!("delay");
     let timer = Instant::now();
@@ -199,7 +201,7 @@ fn test_delay() {
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_freq_and_count() {
     let local_registry = fail::FailPointRegistry::new();
-    local_registry.register_current().unwrap();
+    local_registry.register_current();
 
     let f = || {
         fail_point!("freq_and_count", |s: Option<String>| s
@@ -223,7 +225,7 @@ fn test_freq_and_count() {
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_condition() {
     let local_registry = fail::FailPointRegistry::new();
-    local_registry.register_current().unwrap();
+    local_registry.register_current();
 
     let f = |_enabled| {
         fail_point!("condition", _enabled, |_| 2);
@@ -238,9 +240,10 @@ fn test_condition() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_list() {
     let local_registry = fail::FailPointRegistry::new();
-    local_registry.register_current().unwrap();
+    local_registry.register_current();
 
     assert!(!fail::list().contains(&("list".to_string(), "off".to_string())));
     fail::cfg("list", "off").unwrap();
@@ -250,13 +253,14 @@ fn test_list() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_multiple_threads_cleanup() {
     let local_registry = fail::FailPointRegistry::new();
-    local_registry.register_current().unwrap();
+    local_registry.register_current();
 
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        local_registry.register_current().unwrap();
+        local_registry.register_current();
         fail::cfg("thread_point", "sleep(10)").unwrap();
         tx.send(()).unwrap();
     });
@@ -272,7 +276,7 @@ fn test_multiple_threads_cleanup() {
     let (tx, rx) = mpsc::channel();
     let t = thread::spawn(move || {
         let local_registry = fail::FailPointRegistry::new();
-        local_registry.register_current().unwrap();
+        local_registry.register_current();
         fail::cfg("thread_point", "panic").unwrap();
         let l = fail::list();
         assert!(
