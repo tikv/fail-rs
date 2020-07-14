@@ -102,7 +102,7 @@
 //! fn test_fallible_work() {
 //!     let local_registry = fail::FailPointRegistry::new();
 //!     local_registry.register_current();
-//!     fail::cfg("read-dir", "panic").unwrap();
+//!     fail::cfg("read-dir", "panic");
 //!
 //!     do_fallible_work();
 //!
@@ -120,12 +120,12 @@
 //! use fail::FailScenario;
 //!
 //! let _scenario = FailScenario::setup();
-//! fail::cfg("p1", "sleep(100)").unwrap();
+//! fail::cfg("p1", "sleep(100)");
 //! println!("Global registry: {:?}", fail::list());
 //! {
 //!     let local_registry = fail::FailPointRegistry::new();
 //!     local_registry.register_current();
-//!     fail::cfg("p0", "pause").unwrap();
+//!     fail::cfg("p0", "pause");
 //!     println!("Local registry: {:?}", fail::list());
 //!     local_registry.teardown();
 //!     println!("Local registry: {:?}", fail::list());
@@ -571,7 +571,7 @@ impl FailPointRegistry {
                 let id = thread::current().id();
                 group
                     .get(&id)
-                    .unwrap_or(REGISTRY_GLOBAL.registry.as_ref().unwrap())
+                    .unwrap_or_else(|| REGISTRY_GLOBAL.registry.as_ref().unwrap())
                     .clone()
             };
             FailPointRegistry {
@@ -726,7 +726,7 @@ pub fn list() -> Vec<(String, String)> {
         let id = thread::current().id();
         group
             .get(&id)
-            .unwrap_or(REGISTRY_GLOBAL.registry.as_ref().unwrap())
+            .unwrap_or_else(|| REGISTRY_GLOBAL.registry.as_ref().unwrap())
             .clone()
     };
 
@@ -746,7 +746,7 @@ pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
             let id = thread::current().id();
             group
                 .get(&id)
-                .unwrap_or(REGISTRY_GLOBAL.registry.as_ref().unwrap())
+                .unwrap_or_else(|| REGISTRY_GLOBAL.registry.as_ref().unwrap())
                 .clone()
         };
 
@@ -791,18 +791,22 @@ pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
 /// A call to `cfg` with a particular fail point name overwrites any existing actions for
 /// that fail point, including those set via the `FAILPOINTS` environment variable.
 pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
-    let registry = {
-        let group = REGISTRY_GROUP.read().unwrap();
-        let id = thread::current().id();
-        group
-            .get(&id)
-            .unwrap_or(REGISTRY_GLOBAL.registry.as_ref().unwrap())
-            .clone()
-    };
+    if cfg!(feature = "failpoints") {
+        let registry = {
+            let group = REGISTRY_GROUP.read().unwrap();
+            let id = thread::current().id();
+            group
+                .get(&id)
+                .unwrap_or_else(|| REGISTRY_GLOBAL.registry.as_ref().unwrap())
+                .clone()
+        };
 
-    let mut registry = registry.write().unwrap();
+        let mut registry = registry.write().unwrap();
 
-    set(&mut registry, name.into(), actions)
+        set(&mut registry, name.into(), actions)
+    } else {
+        Err("failpoints is not enabled".to_owned())
+    }
 }
 
 /// Configure the actions for a fail point in current registry at runtime.
@@ -819,7 +823,7 @@ where
         let id = thread::current().id();
         group
             .get(&id)
-            .unwrap_or(REGISTRY_GLOBAL.registry.as_ref().unwrap())
+            .unwrap_or_else(|| REGISTRY_GLOBAL.registry.as_ref().unwrap())
             .clone()
     };
 
@@ -844,7 +848,7 @@ pub fn remove<S: AsRef<str>>(name: S) {
         let id = thread::current().id();
         group
             .get(&id)
-            .unwrap_or(REGISTRY_GLOBAL.registry.as_ref().unwrap())
+            .unwrap_or_else(|| REGISTRY_GLOBAL.registry.as_ref().unwrap())
             .clone()
     };
 
