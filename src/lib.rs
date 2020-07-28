@@ -129,7 +129,7 @@
 //!     println!("Local registry: {:?}", fail::list());
 //!     local_registry.teardown();
 //!     println!("Local registry: {:?}", fail::list());
-//!     local_registry.deregister_current();
+//!     fail::FailPointRegistry::deregister_current();
 //! }
 //! println!("Global registry: {:?}", fail::list());
 //! ```
@@ -594,7 +594,7 @@ impl FailPointRegistry {
     }
 
     /// Deregister the current thread to this failpoints registry.
-    pub fn deregister_current(&self) {
+    pub fn deregister_current() {
         if cfg!(feature = "failpoints") {
             let id = thread::current().id();
             REGISTRY_GROUP.write().unwrap().remove(&id);
