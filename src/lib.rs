@@ -76,10 +76,10 @@
 //! environment variable. In practice, you'll often want to trigger fail points
 //! programmatically, in unit tests.
 //!
-//! Fail points are managed by the registry which store a map of the fail points
+//! Fail points are managed by the registry which stores a map of the fail points
 //! names and actions. The registry is divided into local and global.
 //!
-//! When you don't specifically declare a registry, the global registry will be used
+//! When you don't declare a registry explicitly, the global registry will be used
 //! by default. You can pass the setting from environment variables to the global registry.
 //! Sometimes you need different tests to use different registries and don’t want their
 //! behavior to interfere with each other. You can create a local registry and then register
@@ -110,7 +110,7 @@
 //! }
 //! ```
 //!
-//! It should be noted that the local registry will will overwrite the global registry
+//! It should be noted that the local registry will overwrite the global registry
 //! if you register the current thread here. This means that the current thread can only
 //! use the fail points configuration of the local registry after registration.
 //!
@@ -133,17 +133,17 @@
 //! }
 //! println!("Global registry: {:?}", fail::list());
 //! ```
-//! When the example is run normally it prints out the contents of the registry used
+//! The example will print out the contents of the registry used
 //! at the time.
 //!
 //! ```sh
 //! FAILPOINTS=p0=return cargo run --features fail/failpoints
 //!     Finished dev [unoptimized + debuginfo] target(s) in 0.01s
 //!      Running `target/debug/failpointtest`
-//! Global registry: [("p1", "sleep(100)")]
+//! Global registry: [("p0", "return"), ("p1", "sleep(100)")]
 //! Local registry: [("p0", "pause")]
 //! Local registry: []
-//! Global registry: [("p1", "sleep(100)")]
+//! Global registry: [("p0", "return"), ("p1", "sleep(100)")]
 //! ```
 //!
 //! In this example, program update global registry with environment variable first.
