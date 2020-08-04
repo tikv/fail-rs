@@ -2,13 +2,13 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::*;
+use std::thread;
 use std::time::*;
-use std::*;
 
 use fail::fail_point;
 
 #[test]
-#[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg(feature = "failpoints")]
 fn test_pause() {
     let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current();
@@ -42,7 +42,7 @@ fn test_pause() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg(feature = "failpoints")]
 fn test_off() {
     let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current();
@@ -58,7 +58,7 @@ fn test_off() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg(feature = "failpoints")]
 fn test_return() {
     let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current();
@@ -78,7 +78,7 @@ fn test_return() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg(feature = "failpoints")]
 fn test_sleep() {
     let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current();
@@ -98,7 +98,7 @@ fn test_sleep() {
 
 #[test]
 #[should_panic]
-#[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg(feature = "failpoints")]
 fn test_panic() {
     let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current();
@@ -111,7 +111,7 @@ fn test_panic() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg(feature = "failpoints")]
 fn test_print() {
     let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current();
@@ -148,7 +148,7 @@ fn test_print() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg(feature = "failpoints")]
 fn test_yield() {
     let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current();
@@ -161,7 +161,7 @@ fn test_yield() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg(feature = "failpoints")]
 fn test_callback() {
     let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current();
@@ -185,7 +185,7 @@ fn test_callback() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg(feature = "failpoints")]
 fn test_delay() {
     let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current();
@@ -198,7 +198,7 @@ fn test_delay() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg(feature = "failpoints")]
 fn test_freq_and_count() {
     let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current();
@@ -222,7 +222,7 @@ fn test_freq_and_count() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg(feature = "failpoints")]
 fn test_condition() {
     let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current();
@@ -240,7 +240,7 @@ fn test_condition() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg(feature = "failpoints")]
 fn test_list() {
     let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current();
@@ -253,7 +253,7 @@ fn test_list() {
 }
 
 #[test]
-#[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg(feature = "failpoints")]
 fn test_multiple_threads_cleanup() {
     let local_registry = fail::FailPointRegistry::new();
     local_registry.register_current();
