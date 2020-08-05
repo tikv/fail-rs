@@ -27,7 +27,7 @@
 //! As an example, here's a simple program that uses a fail point to simulate an
 //! I/O panic:
 //!
-//! ```rust
+//! ```ignore
 //! use fail::{fail_point, FailScenario};
 //!
 //! fn do_fallible_work() {
@@ -75,14 +75,21 @@
 //! The previous example triggers a fail point by modifying the `FAILPOINT`
 //! environment variable. In practice, you'll often want to trigger fail points
 //! programmatically, in unit tests.
-//! Fail points are global resources, and Rust tests run in parallel,
-//! so tests that exercise fail points generally need to hold a lock to
-//! avoid interfering with each other. This is accomplished by `FailScenario`.
+//!
+//! Fail points are managed by the registry which stores a map of the fail points
+//! names and actions. The registry is divided into local and global.
+//!
+//! When you don't declare a registry explicitly, the global registry will be used
+//! by default. You can pass the setting from environment variables to the global registry.
+//! Sometimes you need different tests to use different registries and don’t want their
+//! behavior to interfere with each other. You can create a local registry and then register
+//! threads that need to share the same registry. Or you can still use `FailScenario` to
+//! sequentially configure different global registry.
 //!
 //! Here's a basic pattern for writing unit tests tests with fail points:
 //!
-//! ```rust
-//! use fail::{fail_point, FailScenario};
+//! ```ignore
+//! use fail::fail_point;
 //!
 //! fn do_fallible_work() {
 //!     fail_point!("read-dir");
@@ -93,28 +100,58 @@
 //! #[test]
 //! #[should_panic]
 //! fn test_fallible_work() {
-//!     let scenario = FailScenario::setup();
-//!     fail::cfg("read-dir", "panic").unwrap();
+//!     let local_registry = fail::FailPointRegistry::new();
+//!     local_registry.register_current();
+//!     fail::cfg("read-dir", "panic");
 //!
 //!     do_fallible_work();
 //!
-//!     scenario.teardown();
+//!     local_registry.teardown();
 //! }
 //! ```
 //!
-//! Even if a test does not itself turn on any fail points, code that it runs
-//! could trigger a fail point that was configured by another thread. Because of
-//! this it is a best practice to put all fail point unit tests into their own
-//! binary. Here's an example of a snippet from `Cargo.toml` that creates a
-//! fail-point-specific test binary:
+//! It should be noted that the local registry will overwrite the global registry
+//! if you register the current thread here. This means that the current thread can only
+//! use the fail points configuration of the local registry after registration.
 //!
-//! ```toml
-//! [[test]]
-//! name = "failpoints"
-//! path = "tests/failpoints/mod.rs"
-//! required-features = ["fail/failpoints"]
+//! Here's a example to show the process：
+//!
+//! ```ignore
+//! use fail::FailScenario;
+//!
+//! let _scenario = FailScenario::setup();
+//! fail::cfg("p1", "sleep(100)");
+//! println!("Global registry: {:?}", fail::list());
+//! {
+//!     let local_registry = fail::FailPointRegistry::new();
+//!     local_registry.register_current();
+//!     fail::cfg("p0", "pause");
+//!     println!("Local registry: {:?}", fail::list());
+//!     local_registry.teardown();
+//!     println!("Local registry: {:?}", fail::list());
+//!     fail::FailPointRegistry::deregister_current();
+//! }
+//! println!("Global registry: {:?}", fail::list());
+//! ```
+//! The example will print out the contents of the registry used
+//! at the time.
+//!
+//! ```sh
+//! FAILPOINTS=p0=return cargo run --features fail/failpoints
+//!     Finished dev [unoptimized + debuginfo] target(s) in 0.01s
+//!      Running `target/debug/failpointtest`
+//! Global registry: [("p0", "return"), ("p1", "sleep(100)")]
+//! Local registry: [("p0", "pause")]
+//! Local registry: []
+//! Global registry: [("p0", "return"), ("p1", "sleep(100)")]
 //! ```
 //!
+//! In this example, program update global registry with environment variable first.
+//! Then config "p1" with "sleep(100)" in global registry because up to now, it has not
+//! been bound to a local registry. After that, we create a new fail group and the
+//! registry is also replaced with a local registry correspondingly. Finally, we print
+//! out the global registry to show that the operations of the two registries do not
+//! affect each other.
 //!
 //! ## Early return
 //!
@@ -130,7 +167,7 @@
 //! `fail_point!` macro. To illustrate this, let's modify the `do_fallible_work`
 //! function we used earlier to return a `Result`:
 //!
-//! ```rust
+//! ```ignore
 //! use fail::{fail_point, FailScenario};
 //! use std::io;
 //!
@@ -174,7 +211,7 @@
 //!
 //! Here's a variation that does so:
 //!
-//! ```rust
+//! ```ignore
 //! # use std::io;
 //! fn do_fallible_work() -> io::Result<()> {
 //!     fail::fail_point!("read-dir", |_| {
@@ -225,381 +262,731 @@
 
 #![deny(missing_docs, missing_debug_implementations)]
 
-use std::collections::HashMap;
-use std::env::VarError;
-use std::fmt::Debug;
-use std::str::FromStr;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, TryLockError};
-use std::time::{Duration, Instant};
-use std::{env, thread};
+#[cfg(not(feature = "failpoints"))]
+pub use disable_failpoint::*;
+#[cfg(feature = "failpoints")]
+pub use enable_failpoint::*;
 
-#[derive(Clone)]
-struct SyncCallback(Arc<dyn Fn() + Send + Sync>);
+#[cfg(feature = "failpoints")]
+#[macro_use]
+mod enable_failpoint {
+    use std::collections::HashMap;
+    use std::env::VarError;
+    use std::fmt::Debug;
+    use std::str::FromStr;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::MutexGuard;
+    use std::sync::{Arc, Condvar, Mutex, RwLock, TryLockError};
+    use std::time::{Duration, Instant};
+    use std::{env, thread};
 
-impl Debug for SyncCallback {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("SyncCallback()")
-    }
-}
+    /// Registry with failpoints configuration.
+    type Registry = HashMap<String, Arc<FailPoint>>;
 
-impl PartialEq for SyncCallback {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-impl SyncCallback {
-    fn new(f: impl Fn() + Send + Sync + 'static) -> SyncCallback {
-        SyncCallback(Arc::new(f))
+    lazy_static::lazy_static! {
+        static ref REGISTRY_GROUP: RwLock<HashMap<thread::ThreadId, Arc<RwLock<Registry>>>> = Default::default();
+        static ref REGISTRY_GLOBAL: FailPointRegistry = FailPointRegistry::default();
+        static ref SCENARIO: Mutex<&'static FailPointRegistry> = Mutex::new(&REGISTRY_GLOBAL);
     }
 
-    fn run(&self) {
-        let callback = &self.0;
-        callback();
-    }
-}
-
-/// Supported tasks.
-#[derive(Clone, Debug, PartialEq)]
-enum Task {
-    /// Do nothing.
-    Off,
-    /// Return the value.
-    Return(Option<String>),
-    /// Sleep for some milliseconds.
-    Sleep(u64),
-    /// Panic with the message.
-    Panic(Option<String>),
-    /// Print the message.
-    Print(Option<String>),
-    /// Sleep until other action is set.
-    Pause,
-    /// Yield the CPU.
-    Yield,
-    /// Busy waiting for some milliseconds.
-    Delay(u64),
-    /// Call callback function.
-    Callback(SyncCallback),
-}
-
-#[derive(Debug)]
-struct Action {
-    task: Task,
-    freq: f32,
-    count: Option<AtomicUsize>,
-}
-
-impl PartialEq for Action {
-    fn eq(&self, hs: &Action) -> bool {
-        if self.task != hs.task || self.freq != hs.freq {
-            return false;
-        }
-        if let Some(ref lhs) = self.count {
-            if let Some(ref rhs) = hs.count {
-                return lhs.load(Ordering::Relaxed) == rhs.load(Ordering::Relaxed);
-            }
-        } else if hs.count.is_none() {
-            return true;
-        }
-        false
-    }
-}
-
-impl Action {
-    fn new(task: Task, freq: f32, max_cnt: Option<usize>) -> Action {
-        Action {
-            task,
-            freq,
-            count: max_cnt.map(AtomicUsize::new),
-        }
+    /// Fail point registry. Threads bound to the same registry share the same
+    /// failpoints configuration.
+    #[derive(Debug, Default, Clone)]
+    pub struct FailPointRegistry {
+        // TODO: remove rwlock or store *mut FailPoint
+        registry: Arc<RwLock<Registry>>,
     }
 
-    fn from_callback(f: impl Fn() + Send + Sync + 'static) -> Action {
-        let task = Task::Callback(SyncCallback::new(f));
-        Action {
-            task,
-            freq: 1.0,
-            count: None,
-        }
-    }
-
-    fn get_task(&self) -> Option<Task> {
-        use rand::Rng;
-
-        if let Some(ref cnt) = self.count {
-            let c = cnt.load(Ordering::Acquire);
-            if c == 0 {
-                return None;
+    impl FailPointRegistry {
+        /// Generate a new failpoint registry. The new registry will inherit the
+        /// global failpoints configuration.
+        ///
+        /// Each thread should be bound to exact one registry. Threads bound to the
+        /// same registry share the same failpoints configuration.
+        pub fn new() -> Self {
+            FailPointRegistry {
+                registry: Arc::new(RwLock::new(Registry::new())),
             }
         }
-        if self.freq < 1f32 && !rand::thread_rng().gen_bool(f64::from(self.freq)) {
-            return None;
+
+        /// Returns the failpoint registry to which the current thread is bound. If
+        /// `failpoints` feature is not enabled, the internal registry is none.
+        pub fn current_registry() -> Self {
+            let registry = {
+                let group = REGISTRY_GROUP.read().unwrap();
+                let id = thread::current().id();
+                group
+                    .get(&id)
+                    .unwrap_or_else(|| &REGISTRY_GLOBAL.registry)
+                    .clone()
+            };
+            FailPointRegistry { registry }
         }
-        if let Some(ref cnt) = self.count {
-            loop {
-                let c = cnt.load(Ordering::Acquire);
-                if c == 0 {
-                    return None;
+
+        /// Register the current thread to this failpoints registry.
+        pub fn register_current(&self) {
+            let id = thread::current().id();
+            REGISTRY_GROUP
+                .write()
+                .unwrap()
+                .insert(id, self.registry.clone());
+        }
+
+        /// Deregister the current thread to this failpoints registry.
+        pub fn deregister_current() {
+            let id = thread::current().id();
+            REGISTRY_GROUP.write().unwrap().remove(&id);
+        }
+
+        /// Clean up registered fail points in this registry.
+        pub fn teardown(&self) {
+            let mut registry = self.registry.write().unwrap();
+            cleanup(&mut registry);
+        }
+    }
+
+    /// Test scenario with configured fail points.
+    #[derive(Debug)]
+    pub struct FailScenario<'a> {
+        scenario_guard: MutexGuard<'a, &'static FailPointRegistry>,
+    }
+
+    impl<'a> FailScenario<'a> {
+        /// Set up the system for a fail points scenario.
+        ///
+        /// Configures global fail points specified in the `FAILPOINTS` environment variable.
+        /// It does not otherwise change any existing fail point configuration.
+        ///
+        /// The format of `FAILPOINTS` is `failpoint=actions;...`, where
+        /// `failpoint` is the name of the fail point. For more information
+        /// about fail point actions see the [`cfg`](fn.cfg.html) function and
+        /// the [`fail_point`](macro.fail_point.html) macro.
+        ///
+        /// `FAILPOINTS` may configure fail points that are not actually defined. In
+        /// this case the configuration has no effect.
+        ///
+        /// This function should generally be called prior to running a test with fail
+        /// points, and afterward paired with [`teardown`](#method.teardown).
+        ///
+        /// # Panics
+        ///
+        /// Panics if an action is not formatted correctly.
+        pub fn setup() -> Self {
+            // Cleanup first, in case of previous failed/panic'ed test scenarios.
+            let scenario_guard = SCENARIO.lock().unwrap_or_else(|e| e.into_inner());
+            let mut registry = scenario_guard.registry.write().unwrap();
+            cleanup(&mut registry);
+
+            let failpoints = match env::var("FAILPOINTS") {
+                Ok(s) => s,
+                Err(VarError::NotPresent) => return Self { scenario_guard },
+                Err(e) => panic!("invalid failpoints: {:?}", e),
+            };
+            for mut cfg in failpoints.trim().split(';') {
+                cfg = cfg.trim();
+                if cfg.is_empty() {
+                    continue;
                 }
-                if c == cnt.compare_and_swap(c, c - 1, Ordering::AcqRel) {
-                    break;
-                }
-            }
-        }
-        Some(self.task.clone())
-    }
-}
-
-fn partition(s: &str, pattern: char) -> (&str, Option<&str>) {
-    let mut splits = s.splitn(2, pattern);
-    (splits.next().unwrap(), splits.next())
-}
-
-impl FromStr for Action {
-    type Err = String;
-
-    /// Parse an action.
-    ///
-    /// `s` should be in the format `[p%][cnt*]task[(args)]`, `p%` is the frequency,
-    /// `cnt` is the max times the action can be triggered.
-    fn from_str(s: &str) -> Result<Action, String> {
-        let mut remain = s.trim();
-        let mut args = None;
-        // in case there is '%' in args, we need to parse it first.
-        let (first, second) = partition(remain, '(');
-        if let Some(second) = second {
-            remain = first;
-            if !second.ends_with(')') {
-                return Err("parentheses do not match".to_owned());
-            }
-            args = Some(&second[..second.len() - 1]);
-        }
-
-        let mut frequency = 1f32;
-        let (first, second) = partition(remain, '%');
-        if let Some(second) = second {
-            remain = second;
-            match first.parse::<f32>() {
-                Err(e) => return Err(format!("failed to parse frequency: {}", e)),
-                Ok(freq) => frequency = freq / 100.0,
-            }
-        }
-
-        let mut max_cnt = None;
-        let (first, second) = partition(remain, '*');
-        if let Some(second) = second {
-            remain = second;
-            match first.parse() {
-                Err(e) => return Err(format!("failed to parse count: {}", e)),
-                Ok(cnt) => max_cnt = Some(cnt),
-            }
-        }
-
-        let parse_timeout = || match args {
-            None => Err("sleep require timeout".to_owned()),
-            Some(timeout_str) => match timeout_str.parse() {
-                Err(e) => Err(format!("failed to parse timeout: {}", e)),
-                Ok(timeout) => Ok(timeout),
-            },
-        };
-
-        let task = match remain {
-            "off" => Task::Off,
-            "return" => Task::Return(args.map(str::to_owned)),
-            "sleep" => Task::Sleep(parse_timeout()?),
-            "panic" => Task::Panic(args.map(str::to_owned)),
-            "print" => Task::Print(args.map(str::to_owned)),
-            "pause" => Task::Pause,
-            "yield" => Task::Yield,
-            "delay" => Task::Delay(parse_timeout()?),
-            _ => return Err(format!("unrecognized command {:?}", remain)),
-        };
-
-        Ok(Action::new(task, frequency, max_cnt))
-    }
-}
-
-#[cfg_attr(feature = "cargo-clippy", allow(clippy::mutex_atomic))]
-#[derive(Debug)]
-struct FailPoint {
-    pause: Mutex<bool>,
-    pause_notifier: Condvar,
-    actions: RwLock<Vec<Action>>,
-    actions_str: RwLock<String>,
-}
-
-#[cfg_attr(feature = "cargo-clippy", allow(clippy::mutex_atomic))]
-impl FailPoint {
-    fn new() -> FailPoint {
-        FailPoint {
-            pause: Mutex::new(false),
-            pause_notifier: Condvar::new(),
-            actions: RwLock::default(),
-            actions_str: RwLock::default(),
-        }
-    }
-
-    fn set_actions(&self, actions_str: &str, actions: Vec<Action>) {
-        loop {
-            // TODO: maybe busy waiting here.
-            match self.actions.try_write() {
-                Err(TryLockError::WouldBlock) => {}
-                Ok(mut guard) => {
-                    *guard = actions;
-                    *self.actions_str.write().unwrap() = actions_str.to_string();
-                    return;
-                }
-                Err(e) => panic!("unexpected poison: {:?}", e),
-            }
-            let mut guard = self.pause.lock().unwrap();
-            *guard = false;
-            self.pause_notifier.notify_all();
-        }
-    }
-
-    #[cfg_attr(feature = "cargo-clippy", allow(clippy::option_option))]
-    fn eval(&self, name: &str) -> Option<Option<String>> {
-        let task = {
-            let actions = self.actions.read().unwrap();
-            match actions.iter().filter_map(Action::get_task).next() {
-                Some(Task::Pause) => {
-                    let mut guard = self.pause.lock().unwrap();
-                    *guard = true;
-                    loop {
-                        guard = self.pause_notifier.wait(guard).unwrap();
-                        if !*guard {
-                            break;
+                let (name, order) = partition(cfg, '=');
+                match order {
+                    None => panic!("invalid failpoint: {:?}", cfg),
+                    Some(order) => {
+                        if let Err(e) = set(&mut registry, name.to_owned(), order) {
+                            panic!("unable to configure failpoint \"{}\": {}", name, e);
                         }
                     }
-                    return None;
-                }
-                Some(t) => t,
-                None => return None,
-            }
-        };
-
-        match task {
-            Task::Off => {}
-            Task::Return(s) => return Some(s),
-            Task::Sleep(t) => thread::sleep(Duration::from_millis(t)),
-            Task::Panic(msg) => match msg {
-                Some(ref msg) => panic!("{}", msg),
-                None => panic!("failpoint {} panic", name),
-            },
-            Task::Print(msg) => match msg {
-                Some(ref msg) => log::info!("{}", msg),
-                None => log::info!("failpoint {} executed.", name),
-            },
-            Task::Pause => unreachable!(),
-            Task::Yield => thread::yield_now(),
-            Task::Delay(t) => {
-                let timer = Instant::now();
-                let timeout = Duration::from_millis(t);
-                while timer.elapsed() < timeout {}
-            }
-            Task::Callback(f) => {
-                f.run();
-            }
-        }
-        None
-    }
-}
-
-/// Registry with failpoints configuration.
-type Registry = HashMap<String, Arc<FailPoint>>;
-
-#[derive(Debug, Default)]
-struct FailPointRegistry {
-    // TODO: remove rwlock or store *mut FailPoint
-    registry: RwLock<Registry>,
-}
-
-lazy_static::lazy_static! {
-    static ref REGISTRY: FailPointRegistry = FailPointRegistry::default();
-    static ref SCENARIO: Mutex<&'static FailPointRegistry> = Mutex::new(&REGISTRY);
-}
-
-/// Test scenario with configured fail points.
-#[derive(Debug)]
-pub struct FailScenario<'a> {
-    scenario_guard: MutexGuard<'a, &'static FailPointRegistry>,
-}
-
-impl<'a> FailScenario<'a> {
-    /// Set up the system for a fail points scenario.
-    ///
-    /// Configures all fail points specified in the `FAILPOINTS` environment variable.
-    /// It does not otherwise change any existing fail point configuration.
-    ///
-    /// The format of `FAILPOINTS` is `failpoint=actions;...`, where
-    /// `failpoint` is the name of the fail point. For more information
-    /// about fail point actions see the [`cfg`](fn.cfg.html) function and
-    /// the [`fail_point`](macro.fail_point.html) macro.
-    ///
-    /// `FAILPOINTS` may configure fail points that are not actually defined. In
-    /// this case the configuration has no effect.
-    ///
-    /// This function should generally be called prior to running a test with fail
-    /// points, and afterward paired with [`teardown`](#method.teardown).
-    ///
-    /// # Panics
-    ///
-    /// Panics if an action is not formatted correctly.
-    pub fn setup() -> Self {
-        // Cleanup first, in case of previous failed/panic'ed test scenarios.
-        let scenario_guard = SCENARIO.lock().unwrap_or_else(|e| e.into_inner());
-        let mut registry = scenario_guard.registry.write().unwrap();
-        Self::cleanup(&mut registry);
-
-        let failpoints = match env::var("FAILPOINTS") {
-            Ok(s) => s,
-            Err(VarError::NotPresent) => return Self { scenario_guard },
-            Err(e) => panic!("invalid failpoints: {:?}", e),
-        };
-        for mut cfg in failpoints.trim().split(';') {
-            cfg = cfg.trim();
-            if cfg.is_empty() {
-                continue;
-            }
-            let (name, order) = partition(cfg, '=');
-            match order {
-                None => panic!("invalid failpoint: {:?}", cfg),
-                Some(order) => {
-                    if let Err(e) = set(&mut registry, name.to_owned(), order) {
-                        panic!("unable to configure failpoint \"{}\": {}", name, e);
-                    }
                 }
             }
+            Self { scenario_guard }
         }
-        Self { scenario_guard }
+
+        /// Tear down the global fail points registry.
+        ///
+        /// Clears the configuration of global fail points. Any paused fail
+        /// points will be notified before they are deactivated.
+        ///
+        /// This function should generally be called after running a test with fail points.
+        /// Calling `teardown` without previously calling `setup` results in a no-op.
+        pub fn teardown(self) {
+            drop(self);
+        }
     }
 
-    /// Tear down the fail point system.
-    ///
-    /// Clears the configuration of all fail points. Any paused fail
-    /// points will be notified before they are deactivated.
-    ///
-    /// This function should generally be called after running a test with fail points.
-    /// Calling `teardown` without previously calling `setup` results in a no-op.
-    pub fn teardown(self) {
-        drop(self)
+    impl<'a> Drop for FailScenario<'a> {
+        fn drop(&mut self) {
+            let mut registry = self.scenario_guard.registry.write().unwrap();
+            cleanup(&mut registry);
+        }
     }
 
     /// Clean all registered fail points.
-    fn cleanup(registry: &mut std::sync::RwLockWriteGuard<'a, Registry>) {
+    fn cleanup(registry: &mut std::sync::RwLockWriteGuard<Registry>) {
         for p in registry.values() {
             // wake up all pause failpoint.
             p.set_actions("", vec![]);
         }
         registry.clear();
     }
+
+    /// Get all registered fail points in current registry.
+    ///
+    /// If current thread is not bound to any local registry. It will try to
+    /// get from the global registry.
+    ///
+    /// Return a vector of `(name, actions)` pairs.
+    pub fn list() -> Vec<(String, String)> {
+        let registry = {
+            let group = REGISTRY_GROUP.read().unwrap();
+            let id = thread::current().id();
+            group
+                .get(&id)
+                .unwrap_or_else(|| &REGISTRY_GLOBAL.registry)
+                .clone()
+        };
+
+        let registry = registry.read().unwrap();
+
+        registry
+            .iter()
+            .map(|(name, fp)| (name.to_string(), fp.actions_str.read().unwrap().clone()))
+            .collect()
+    }
+
+    #[doc(hidden)]
+    pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
+        let p = {
+            let registry = {
+                let group = REGISTRY_GROUP.read().unwrap();
+                let id = thread::current().id();
+                group
+                    .get(&id)
+                    .unwrap_or_else(|| &REGISTRY_GLOBAL.registry)
+                    .clone()
+            };
+
+            let registry = registry.read().unwrap();
+
+            match registry.get(name) {
+                None => return None,
+                Some(p) => p.clone(),
+            }
+        };
+        p.eval(name).map(f)
+    }
+
+    /// Configure the actions for a fail point in current registry at runtime.
+    ///
+    /// Each fail point can be configured with a series of actions, specified by the
+    /// `actions` argument. The format of `actions` is `action[->action...]`. When
+    /// multiple actions are specified, an action will be checked only when its
+    /// former action is not triggered.
+    ///
+    /// The format of a single action is `[p%][cnt*]task[(arg)]`. `p%` is the
+    /// expected probability that the action is triggered, and `cnt*` is the max
+    /// times the action can be triggered. The supported values of `task` are:
+    ///
+    /// - `off`, the fail point will do nothing.
+    /// - `return(arg)`, return early when the fail point is triggered. `arg` is passed to `$e` (
+    /// defined via the `fail_point!` macro) as a string.
+    /// - `sleep(milliseconds)`, sleep for the specified time.
+    /// - `panic(msg)`, panic with the message.
+    /// - `print(msg)`, log the message, using the `log` crate, at the `info` level.
+    /// - `pause`, sleep until other action is set to the fail point.
+    /// - `yield`, yield the CPU.
+    /// - `delay(milliseconds)`, busy waiting for the specified time.
+    ///
+    /// For example, `20%3*print(still alive!)->panic` means the fail point has 20% chance to print a
+    /// message "still alive!" and 80% chance to panic. And the message will be printed at most 3
+    /// times.
+    ///
+    /// The `FAILPOINTS` environment variable accepts this same syntax for its fail
+    /// point actions.
+    ///
+    /// A call to `cfg` with a particular fail point name overwrites any existing actions for
+    /// that fail point, including those set via the `FAILPOINTS` environment variable.
+    pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
+        let registry = {
+            let group = REGISTRY_GROUP.read().unwrap();
+            let id = thread::current().id();
+            group
+                .get(&id)
+                .unwrap_or_else(|| &REGISTRY_GLOBAL.registry)
+                .clone()
+        };
+
+        let mut registry = registry.write().unwrap();
+
+        set(&mut registry, name.into(), actions)
+    }
+
+    /// Configure the actions for a fail point in current registry at runtime.
+    ///
+    /// Each fail point can be configured by a callback. Process will call this callback function
+    /// when it meet this fail-point.
+    pub fn cfg_callback<S, F>(name: S, f: F) -> Result<(), String>
+    where
+        S: Into<String>,
+        F: Fn() + Send + Sync + 'static,
+    {
+        let registry = {
+            let group = REGISTRY_GROUP.read().unwrap();
+            let id = thread::current().id();
+            group
+                .get(&id)
+                .unwrap_or_else(|| &REGISTRY_GLOBAL.registry)
+                .clone()
+        };
+
+        let mut registry = registry.write().unwrap();
+
+        let p = registry
+            .entry(name.into())
+            .or_insert_with(|| Arc::new(FailPoint::new()));
+        let action = Action::from_callback(f);
+        let actions = vec![action];
+        p.set_actions("callback", actions);
+        Ok(())
+    }
+
+    /// Remove a fail point.
+    ///
+    /// If the local registry doesn't exist, it will try to delete the corresponding
+    /// action in the global registry.
+    pub fn remove<S: AsRef<str>>(name: S) {
+        let registry = {
+            let group = REGISTRY_GROUP.read().unwrap();
+            let id = thread::current().id();
+            group
+                .get(&id)
+                .unwrap_or_else(|| &REGISTRY_GLOBAL.registry)
+                .clone()
+        };
+
+        let mut registry = registry.write().unwrap();
+
+        if let Some(p) = registry.remove(name.as_ref()) {
+            // wake up all pause failpoint.
+            p.set_actions("", vec![]);
+        }
+    }
+
+    fn set(
+        registry: &mut HashMap<String, Arc<FailPoint>>,
+        name: String,
+        actions: &str,
+    ) -> Result<(), String> {
+        let actions_str = actions;
+        // `actions` are in the format of `failpoint[->failpoint...]`.
+        let actions = actions
+            .split("->")
+            .map(Action::from_str)
+            .collect::<Result<_, _>>()?;
+        // Please note that we can't figure out whether there is a failpoint named `name`,
+        // so we may insert a failpoint that doesn't exist at all.
+        let p = registry
+            .entry(name)
+            .or_insert_with(|| Arc::new(FailPoint::new()));
+        p.set_actions(actions_str, actions);
+        Ok(())
+    }
+
+    /// Define a fail point (requires `failpoints` feature).
+    ///
+    /// The `fail_point!` macro has three forms, and they all take a name as the
+    /// first argument. The simplest form takes only a name and is suitable for
+    /// executing most fail point behavior, including panicking, but not for early
+    /// return or conditional execution based on a local flag.
+    ///
+    /// The three forms of fail points look as follows.
+    ///
+    /// 1. A basic fail point:
+    ///
+    /// ```rust
+    /// # #[macro_use] extern crate fail;
+    /// fn function_return_unit() {
+    ///     fail_point!("fail-point-1");
+    /// }
+    /// ```
+    ///
+    /// This form of fail point can be configured to panic, print, sleep, pause, etc., but
+    /// not to return from the function early.
+    ///
+    /// 2. A fail point that may return early:
+    ///
+    /// ```rust
+    /// # #[macro_use] extern crate fail;
+    /// fn function_return_value() -> u64 {
+    ///     fail_point!("fail-point-2", |r| r.map_or(2, |e| e.parse().unwrap()));
+    ///     0
+    /// }
+    /// ```
+    ///
+    /// This form of fail point can additionally be configured to return early from
+    /// the enclosing function. It accepts a closure, which itself accepts an
+    /// `Option<String>`, and is expected to transform that argument into the early
+    /// return value. The argument string is sourced from the fail point
+    /// configuration string. For example configuring this "fail-point-2" as
+    /// "return(100)" will execute the fail point closure, passing it a `Some` value
+    /// containing a `String` equal to "100"; the closure then parses it into the
+    /// return value.
+    ///
+    /// 3. A fail point with conditional execution:
+    ///
+    /// ```rust
+    /// # #[macro_use] extern crate fail;
+    /// fn function_conditional(enable: bool) {
+    ///     fail_point!("fail-point-3", enable, |_| {});
+    /// }
+    /// ```
+    ///
+    /// In this final form, the second argument is a local boolean expression that
+    /// must evaluate to `true` before the fail point is evaluated. The third
+    /// argument is again an early-return closure.
+    ///
+    /// The three macro arguments (or "designators") are called `$name`, `$cond`,
+    /// and `$e`. `$name` must be `&str`, `$cond` must be a boolean expression,
+    /// and`$e` must be a function or closure that accepts an `Option<String>` and
+    /// returns the same type as the enclosing function.
+    ///
+    /// For more examples see the [crate documentation](index.html). For more
+    /// information about controlling fail points see the [`cfg`](fn.cfg.html)
+    /// function.
+    #[macro_export]
+    macro_rules! fail_point {
+        ($name:expr) => {{
+            $crate::eval($name, |_| {
+                panic!("Return is not supported for the fail point \"{}\"", $name);
+            });
+        }};
+        ($name:expr, $e:expr) => {{
+            if let Some(res) = $crate::eval($name, $e) {
+                return res;
+            }
+        }};
+        ($name:expr, $cond:expr, $e:expr) => {{
+            if $cond {
+                fail_point!($name, $e);
+            }
+        }};
+    }
+
+    #[derive(Clone)]
+    pub(crate) struct SyncCallback(Arc<dyn Fn() + Send + Sync>);
+
+    impl Debug for SyncCallback {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("SyncCallback()")
+        }
+    }
+
+    impl PartialEq for SyncCallback {
+        fn eq(&self, _: &Self) -> bool {
+            unimplemented!()
+        }
+    }
+
+    impl SyncCallback {
+        fn new(f: impl Fn() + Send + Sync + 'static) -> SyncCallback {
+            SyncCallback(Arc::new(f))
+        }
+
+        fn run(&self) {
+            let callback = &self.0;
+            callback();
+        }
+    }
+
+    /// Supported tasks.
+    #[derive(Clone, Debug, PartialEq)]
+    pub(crate) enum Task {
+        /// Do nothing.
+        Off,
+        /// Return the value.
+        Return(Option<String>),
+        /// Sleep for some milliseconds.
+        Sleep(u64),
+        /// Panic with the message.
+        Panic(Option<String>),
+        /// Print the message.
+        Print(Option<String>),
+        /// Sleep until other action is set.
+        Pause,
+        /// Yield the CPU.
+        Yield,
+        /// Busy waiting for some milliseconds.
+        Delay(u64),
+        /// Call callback function.
+        Callback(SyncCallback),
+    }
+
+    #[derive(Debug)]
+    pub(crate) struct Action {
+        task: Task,
+        freq: f32,
+        count: Option<AtomicUsize>,
+    }
+
+    impl PartialEq for Action {
+        fn eq(&self, hs: &Action) -> bool {
+            if self.task != hs.task || self.freq != hs.freq {
+                return false;
+            }
+            if let Some(ref lhs) = self.count {
+                if let Some(ref rhs) = hs.count {
+                    return lhs.load(Ordering::Relaxed) == rhs.load(Ordering::Relaxed);
+                }
+            } else if hs.count.is_none() {
+                return true;
+            }
+            false
+        }
+    }
+
+    impl Action {
+        pub(crate) fn new(task: Task, freq: f32, max_cnt: Option<usize>) -> Action {
+            Action {
+                task,
+                freq,
+                count: max_cnt.map(AtomicUsize::new),
+            }
+        }
+
+        pub(crate) fn from_callback(f: impl Fn() + Send + Sync + 'static) -> Action {
+            let task = Task::Callback(SyncCallback::new(f));
+            Action {
+                task,
+                freq: 1.0,
+                count: None,
+            }
+        }
+
+        pub(crate) fn get_task(&self) -> Option<Task> {
+            use rand::Rng;
+
+            if let Some(ref cnt) = self.count {
+                let c = cnt.load(Ordering::Acquire);
+                if c == 0 {
+                    return None;
+                }
+            }
+            if self.freq < 1f32 && !rand::thread_rng().gen_bool(f64::from(self.freq)) {
+                return None;
+            }
+            if let Some(ref cnt) = self.count {
+                loop {
+                    let c = cnt.load(Ordering::Acquire);
+                    if c == 0 {
+                        return None;
+                    }
+                    if c == cnt.compare_and_swap(c, c - 1, Ordering::AcqRel) {
+                        break;
+                    }
+                }
+            }
+            Some(self.task.clone())
+        }
+    }
+
+    fn partition(s: &str, pattern: char) -> (&str, Option<&str>) {
+        let mut splits = s.splitn(2, pattern);
+        (splits.next().unwrap(), splits.next())
+    }
+
+    impl FromStr for Action {
+        type Err = String;
+
+        /// Parse an action.
+        ///
+        /// `s` should be in the format `[p%][cnt*]task[(args)]`, `p%` is the frequency,
+        /// `cnt` is the max times the action can be triggered.
+        fn from_str(s: &str) -> Result<Action, String> {
+            let mut remain = s.trim();
+            let mut args = None;
+            // in case there is '%' in args, we need to parse it first.
+            let (first, second) = partition(remain, '(');
+            if let Some(second) = second {
+                remain = first;
+                if !second.ends_with(')') {
+                    return Err("parentheses do not match".to_owned());
+                }
+                args = Some(&second[..second.len() - 1]);
+            }
+
+            let mut frequency = 1f32;
+            let (first, second) = partition(remain, '%');
+            if let Some(second) = second {
+                remain = second;
+                match first.parse::<f32>() {
+                    Err(e) => return Err(format!("failed to parse frequency: {}", e)),
+                    Ok(freq) => frequency = freq / 100.0,
+                }
+            }
+
+            let mut max_cnt = None;
+            let (first, second) = partition(remain, '*');
+            if let Some(second) = second {
+                remain = second;
+                match first.parse() {
+                    Err(e) => return Err(format!("failed to parse count: {}", e)),
+                    Ok(cnt) => max_cnt = Some(cnt),
+                }
+            }
+
+            let parse_timeout = || match args {
+                None => Err("sleep require timeout".to_owned()),
+                Some(timeout_str) => match timeout_str.parse() {
+                    Err(e) => Err(format!("failed to parse timeout: {}", e)),
+                    Ok(timeout) => Ok(timeout),
+                },
+            };
+
+            let task = match remain {
+                "off" => Task::Off,
+                "return" => Task::Return(args.map(str::to_owned)),
+                "sleep" => Task::Sleep(parse_timeout()?),
+                "panic" => Task::Panic(args.map(str::to_owned)),
+                "print" => Task::Print(args.map(str::to_owned)),
+                "pause" => Task::Pause,
+                "yield" => Task::Yield,
+                "delay" => Task::Delay(parse_timeout()?),
+                _ => return Err(format!("unrecognized command {:?}", remain)),
+            };
+
+            Ok(Action::new(task, frequency, max_cnt))
+        }
+    }
+
+    #[cfg_attr(feature = "cargo-clippy", allow(clippy::mutex_atomic))]
+    #[derive(Debug, Default)]
+    pub(crate) struct FailPoint {
+        pause: Mutex<bool>,
+        pause_notifier: Condvar,
+        actions: RwLock<Vec<Action>>,
+        actions_str: RwLock<String>,
+    }
+
+    #[cfg_attr(feature = "cargo-clippy", allow(clippy::mutex_atomic))]
+    impl FailPoint {
+        pub(crate) fn new() -> FailPoint {
+            FailPoint::default()
+        }
+
+        pub(crate) fn set_actions(&self, actions_str: &str, actions: Vec<Action>) {
+            loop {
+                // TODO: maybe busy waiting here.
+                match self.actions.try_write() {
+                    Err(TryLockError::WouldBlock) => {}
+                    Ok(mut guard) => {
+                        *guard = actions;
+                        *self.actions_str.write().unwrap() = actions_str.to_string();
+                        return;
+                    }
+                    Err(e) => panic!("unexpected poison: {:?}", e),
+                }
+                let mut guard = self.pause.lock().unwrap();
+                *guard = false;
+                self.pause_notifier.notify_all();
+            }
+        }
+
+        #[cfg_attr(feature = "cargo-clippy", allow(clippy::option_option))]
+        pub(crate) fn eval(&self, name: &str) -> Option<Option<String>> {
+            let task = {
+                let actions = self.actions.read().unwrap();
+                match actions.iter().filter_map(Action::get_task).next() {
+                    Some(Task::Pause) => {
+                        let mut guard = self.pause.lock().unwrap();
+                        *guard = true;
+                        loop {
+                            guard = self.pause_notifier.wait(guard).unwrap();
+                            if !*guard {
+                                break;
+                            }
+                        }
+                        return None;
+                    }
+                    Some(t) => t,
+                    None => return None,
+                }
+            };
+
+            match task {
+                Task::Off => {}
+                Task::Return(s) => return Some(s),
+                Task::Sleep(t) => thread::sleep(Duration::from_millis(t)),
+                Task::Panic(msg) => match msg {
+                    Some(ref msg) => panic!("{}", msg),
+                    None => panic!("failpoint {} panic", name),
+                },
+                Task::Print(msg) => match msg {
+                    Some(ref msg) => log::info!("{}", msg),
+                    None => log::info!("failpoint {} executed.", name),
+                },
+                Task::Pause => unreachable!(),
+                Task::Yield => thread::yield_now(),
+                Task::Delay(t) => {
+                    let timer = Instant::now();
+                    let timeout = Duration::from_millis(t);
+                    while timer.elapsed() < timeout {}
+                }
+                Task::Callback(f) => {
+                    f.run();
+                }
+            }
+            None
+        }
+    }
 }
 
-impl<'a> Drop for FailScenario<'a> {
-    fn drop(&mut self) {
-        let mut registry = self.scenario_guard.registry.write().unwrap();
-        Self::cleanup(&mut registry)
+#[cfg(not(feature = "failpoints"))]
+mod disable_failpoint {
+    #[derive(Debug, Default, Clone)]
+    /// Define a fail point registry (disabled, see `failpoints` feature).
+    pub struct FailPointRegistry;
+
+    impl FailPointRegistry {
+        /// Generate a new failpoint registry (disabled, see `failpoints` feature).
+        pub fn new() -> Self {
+            FailPointRegistry::default()
+        }
+
+        /// Returns the failpoint registry to which the current thread is bound
+        /// (disabled, see `failpoints` feature).
+        pub fn current_registry() -> Self {
+            FailPointRegistry::default()
+        }
+
+        /// Register the current thread (disabled, see `failpoints` feature).
+        pub fn register_current(&self) {}
+
+        /// Deregister the current thread (disabled, see `failpoints` feature).
+        pub fn deregister_current() {}
+
+        /// Clean up fail points in this registry (disabled, see `failpoints` feature).
+        pub fn teardown(&self) {}
+    }
+
+    /// Configure the actions for a fail point in current registry at runtime.
+    /// (disabled, see `failpoints` feature).
+    pub fn cfg<S: Into<String>>(_name: S, _actions: &str) -> Result<(), String> {
+        Err("failpoints is not enabled".to_owned())
+    }
+
+    /// Remove a fail point (disabled, see `failpoints` feature).
+    pub fn remove<S: AsRef<str>>(_name: S) {}
+
+    /// Get all registered fail points in current registry.
+    /// (disabled, see `failpoints` feature).
+    pub fn list() -> Vec<(String, String)> {
+        vec![]
+    }
+
+    /// Define a fail point (disabled, see `failpoints` feature).
+    #[macro_export]
+    macro_rules! fail_point {
+        ($name:expr, $e:expr) => {{}};
+        ($name:expr) => {{}};
+        ($name:expr, $cond:expr, $e:expr) => {{}};
     }
 }
 
@@ -612,209 +999,15 @@ pub const fn has_failpoints() -> bool {
     cfg!(feature = "failpoints")
 }
 
-/// Get all registered fail points.
-///
-/// Return a vector of `(name, actions)` pairs.
-pub fn list() -> Vec<(String, String)> {
-    let registry = REGISTRY.registry.read().unwrap();
-    registry
-        .iter()
-        .map(|(name, fp)| (name.to_string(), fp.actions_str.read().unwrap().clone()))
-        .collect()
-}
-
-#[doc(hidden)]
-pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
-    let p = {
-        let registry = REGISTRY.registry.read().unwrap();
-        match registry.get(name) {
-            None => return None,
-            Some(p) => p.clone(),
-        }
-    };
-    p.eval(name).map(f)
-}
-
-/// Configure the actions for a fail point at runtime.
-///
-/// Each fail point can be configured with a series of actions, specified by the
-/// `actions` argument. The format of `actions` is `action[->action...]`. When
-/// multiple actions are specified, an action will be checked only when its
-/// former action is not triggered.
-///
-/// The format of a single action is `[p%][cnt*]task[(arg)]`. `p%` is the
-/// expected probability that the action is triggered, and `cnt*` is the max
-/// times the action can be triggered. The supported values of `task` are:
-///
-/// - `off`, the fail point will do nothing.
-/// - `return(arg)`, return early when the fail point is triggered. `arg` is passed to `$e` (
-/// defined via the `fail_point!` macro) as a string.
-/// - `sleep(milliseconds)`, sleep for the specified time.
-/// - `panic(msg)`, panic with the message.
-/// - `print(msg)`, log the message, using the `log` crate, at the `info` level.
-/// - `pause`, sleep until other action is set to the fail point.
-/// - `yield`, yield the CPU.
-/// - `delay(milliseconds)`, busy waiting for the specified time.
-///
-/// For example, `20%3*print(still alive!)->panic` means the fail point has 20% chance to print a
-/// message "still alive!" and 80% chance to panic. And the message will be printed at most 3
-/// times.
-///
-/// The `FAILPOINTS` environment variable accepts this same syntax for its fail
-/// point actions.
-///
-/// A call to `cfg` with a particular fail point name overwrites any existing actions for
-/// that fail point, including those set via the `FAILPOINTS` environment variable.
-pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
-    let mut registry = REGISTRY.registry.write().unwrap();
-    set(&mut registry, name.into(), actions)
-}
-
-/// Configure the actions for a fail point at runtime.
-///
-/// Each fail point can be configured by a callback. Process will call this callback function
-/// when it meet this fail-point.
-pub fn cfg_callback<S, F>(name: S, f: F) -> Result<(), String>
-where
-    S: Into<String>,
-    F: Fn() + Send + Sync + 'static,
-{
-    let mut registry = REGISTRY.registry.write().unwrap();
-    let p = registry
-        .entry(name.into())
-        .or_insert_with(|| Arc::new(FailPoint::new()));
-    let action = Action::from_callback(f);
-    let actions = vec![action];
-    p.set_actions("callback", actions);
-    Ok(())
-}
-
-/// Remove a fail point.
-///
-/// If the fail point doesn't exist, nothing will happen.
-pub fn remove<S: AsRef<str>>(name: S) {
-    let mut registry = REGISTRY.registry.write().unwrap();
-    if let Some(p) = registry.remove(name.as_ref()) {
-        // wake up all pause failpoint.
-        p.set_actions("", vec![]);
-    }
-}
-
-fn set(
-    registry: &mut HashMap<String, Arc<FailPoint>>,
-    name: String,
-    actions: &str,
-) -> Result<(), String> {
-    let actions_str = actions;
-    // `actions` are in the format of `failpoint[->failpoint...]`.
-    let actions = actions
-        .split("->")
-        .map(Action::from_str)
-        .collect::<Result<_, _>>()?;
-    // Please note that we can't figure out whether there is a failpoint named `name`,
-    // so we may insert a failpoint that doesn't exist at all.
-    let p = registry
-        .entry(name)
-        .or_insert_with(|| Arc::new(FailPoint::new()));
-    p.set_actions(actions_str, actions);
-    Ok(())
-}
-
-/// Define a fail point (requires `failpoints` feature).
-///
-/// The `fail_point!` macro has three forms, and they all take a name as the
-/// first argument. The simplest form takes only a name and is suitable for
-/// executing most fail point behavior, including panicking, but not for early
-/// return or conditional execution based on a local flag.
-///
-/// The three forms of fail points look as follows.
-///
-/// 1. A basic fail point:
-///
-/// ```rust
-/// # #[macro_use] extern crate fail;
-/// fn function_return_unit() {
-///     fail_point!("fail-point-1");
-/// }
-/// ```
-///
-/// This form of fail point can be configured to panic, print, sleep, pause, etc., but
-/// not to return from the function early.
-///
-/// 2. A fail point that may return early:
-///
-/// ```rust
-/// # #[macro_use] extern crate fail;
-/// fn function_return_value() -> u64 {
-///     fail_point!("fail-point-2", |r| r.map_or(2, |e| e.parse().unwrap()));
-///     0
-/// }
-/// ```
-///
-/// This form of fail point can additionally be configured to return early from
-/// the enclosing function. It accepts a closure, which itself accepts an
-/// `Option<String>`, and is expected to transform that argument into the early
-/// return value. The argument string is sourced from the fail point
-/// configuration string. For example configuring this "fail-point-2" as
-/// "return(100)" will execute the fail point closure, passing it a `Some` value
-/// containing a `String` equal to "100"; the closure then parses it into the
-/// return value.
-///
-/// 3. A fail point with conditional execution:
-///
-/// ```rust
-/// # #[macro_use] extern crate fail;
-/// fn function_conditional(enable: bool) {
-///     fail_point!("fail-point-3", enable, |_| {});
-/// }
-/// ```
-///
-/// In this final form, the second argument is a local boolean expression that
-/// must evaluate to `true` before the fail point is evaluated. The third
-/// argument is again an early-return closure.
-///
-/// The three macro arguments (or "designators") are called `$name`, `$cond`,
-/// and `$e`. `$name` must be `&str`, `$cond` must be a boolean expression,
-/// and`$e` must be a function or closure that accepts an `Option<String>` and
-/// returns the same type as the enclosing function.
-///
-/// For more examples see the [crate documentation](index.html). For more
-/// information about controlling fail points see the [`cfg`](fn.cfg.html)
-/// function.
-#[macro_export]
-#[cfg(feature = "failpoints")]
-macro_rules! fail_point {
-    ($name:expr) => {{
-        $crate::eval($name, |_| {
-            panic!("Return is not supported for the fail point \"{}\"", $name);
-        });
-    }};
-    ($name:expr, $e:expr) => {{
-        if let Some(res) = $crate::eval($name, $e) {
-            return res;
-        }
-    }};
-    ($name:expr, $cond:expr, $e:expr) => {{
-        if $cond {
-            fail_point!($name, $e);
-        }
-    }};
-}
-
-/// Define a fail point (disabled, see `failpoints` feature).
-#[macro_export]
-#[cfg(not(feature = "failpoints"))]
-macro_rules! fail_point {
-    ($name:expr, $e:expr) => {{}};
-    ($name:expr) => {{}};
-    ($name:expr, $cond:expr, $e:expr) => {{}};
-}
-
 #[cfg(test)]
+#[cfg(feature = "failpoints")]
 mod tests {
+    use super::enable_failpoint::*;
     use super::*;
-
+    use std::env;
     use std::sync::*;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn test_has_failpoints() {
@@ -993,7 +1186,6 @@ mod tests {
     // This case should be tested as integration case, but when calling `teardown` other cases
     // like `test_pause` maybe also affected, so it's better keep it here.
     #[test]
-    #[cfg_attr(not(feature = "failpoints"), ignore)]
     fn test_setup_and_teardown() {
         let f1 = || {
             fail_point!("setup_and_teardown1", |_| 1);
@@ -1008,6 +1200,28 @@ mod tests {
             "setup_and_teardown1=return;setup_and_teardown2=pause;",
         );
         let scenario = FailScenario::setup();
+
+        let group = FailPointRegistry::new();
+        let handler = thread::spawn(move || {
+            group.register_current();
+            cfg("setup_and_teardown1", "panic").unwrap();
+            cfg("setup_and_teardown2", "panic").unwrap();
+            let l = list();
+            assert!(
+                l.iter()
+                    .find(|&x| x == &("setup_and_teardown1".to_owned(), "panic".to_owned()))
+                    .is_some()
+                    && l.iter()
+                        .find(|&x| x == &("setup_and_teardown2".to_owned(), "panic".to_owned()))
+                        .is_some()
+                    && l.len() == 2
+            );
+            remove("setup_and_teardown2");
+            let l = list();
+            assert!(l.len() == 1);
+        });
+        handler.join().unwrap();
+
         assert_eq!(f1(), 1);
 
         let (tx, rx) = mpsc::channel();
