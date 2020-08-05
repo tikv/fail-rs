@@ -505,22 +505,18 @@ mod enable_failpoint {
     /// A call to `cfg` with a particular fail point name overwrites any existing actions for
     /// that fail point, including those set via the `FAILPOINTS` environment variable.
     pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
-        if cfg!(feature = "failpoints") {
-            let registry = {
-                let group = REGISTRY_GROUP.read().unwrap();
-                let id = thread::current().id();
-                group
-                    .get(&id)
-                    .unwrap_or_else(|| &REGISTRY_GLOBAL.registry)
-                    .clone()
-            };
+        let registry = {
+            let group = REGISTRY_GROUP.read().unwrap();
+            let id = thread::current().id();
+            group
+                .get(&id)
+                .unwrap_or_else(|| &REGISTRY_GLOBAL.registry)
+                .clone()
+        };
 
-            let mut registry = registry.write().unwrap();
+        let mut registry = registry.write().unwrap();
 
-            set(&mut registry, name.into(), actions)
-        } else {
-            Err("failpoints is not enabled".to_owned())
-        }
+        set(&mut registry, name.into(), actions)
     }
 
     /// Configure the actions for a fail point in current registry at runtime.
@@ -968,6 +964,21 @@ mod disable_failpoint {
 
         /// Clean up fail points in this registry (disabled, see `failpoints` feature).
         pub fn teardown(&self) {}
+    }
+
+    /// Configure the actions for a fail point in current registry at runtime.
+    /// (disabled, see `failpoints` feature).
+    pub fn cfg<S: Into<String>>(_name: S, _actions: &str) -> Result<(), String> {
+        Err("failpoints is not enabled".to_owned())
+    }
+
+    /// Remove a fail point (disabled, see `failpoints` feature).
+    pub fn remove<S: AsRef<str>>(_name: S) {}
+
+    /// Get all registered fail points in current registry.
+    /// (disabled, see `failpoints` feature).
+    pub fn list() -> Vec<(String, String)> {
+        vec![]
     }
 
     /// Define a fail point (disabled, see `failpoints` feature).
