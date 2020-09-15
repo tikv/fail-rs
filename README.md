@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/tikv/fail-rs/workflows/CI/badge.svg)](https://github.com/tikv/fail-rs/actions)
 [![Crates.io](https://img.shields.io/crates/v/fail.svg?maxAge=2592000)](https://crates.io/crates/fail)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Ftikv%2Ffail-rs.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Ftikv%2Ffail-rs?ref=badge_shield)
 
 [Documentation](https://docs.rs/fail).
 
@@ -69,3 +70,7 @@ For further information see the [API documentation](https://docs.rs/fail).
 ## TODO
 
 Triggering a fail point via the HTTP API is planned but not implemented yet.
+
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Ftikv%2Ffail-rs.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Ftikv%2Ffail-rs?ref=badge_large)
