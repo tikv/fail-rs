@@ -243,10 +243,9 @@ impl Debug for SyncCallback {
     }
 }
 
-#[allow(clippy::vtable_address_comparisons)]
 impl PartialEq for SyncCallback {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+    fn eq(&self, _: &Self) -> bool {
+        unimplemented!()
     }
 }
 
