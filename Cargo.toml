@@ -15,8 +15,8 @@ exclude = ["/.github/*", "/.travis.yml", "/appveyor.yml"]
 
 [dependencies]
 log = { version = "0.4", features = ["std"] }
-lazy_static = "1.2"
-rand = "0.7"
+lazy_static = "1.4"
+rand = "0.8"
 
 [features]
 failpoints = []

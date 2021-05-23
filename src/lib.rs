@@ -243,6 +243,7 @@ impl Debug for SyncCallback {
     }
 }
 
+#[allow(clippy::vtable_address_comparisons)]
 impl PartialEq for SyncCallback {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
@@ -336,14 +337,16 @@ impl Action {
         if self.freq < 1f32 && !rand::thread_rng().gen_bool(f64::from(self.freq)) {
             return None;
         }
-        if let Some(ref cnt) = self.count {
+        if let Some(ref ref_cnt) = self.count {
+            let mut cnt = ref_cnt.load(Ordering::Acquire);
             loop {
-                let c = cnt.load(Ordering::Acquire);
-                if c == 0 {
+                if cnt == 0 {
                     return None;
                 }
-                if c == cnt.compare_and_swap(c, c - 1, Ordering::AcqRel) {
-                    break;
+                let new_cnt = cnt - 1;
+                match ref_cnt.compare_exchange(cnt, new_cnt, Ordering::AcqRel, Ordering::Acquire) {
+                    Ok(_) => break,
+                    Err(c) => cnt = c,
                 }
             }
         }
