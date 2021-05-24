@@ -244,8 +244,11 @@ impl Debug for SyncCallback {
 }
 
 impl PartialEq for SyncCallback {
-    fn eq(&self, _: &Self) -> bool {
-        unimplemented!()
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(
+            &*self.0 as *const (dyn Fn() + Send + Sync) as *const u8,
+            &*other.0 as *const (dyn Fn() + Send + Sync) as *const u8,
+        )
     }
 }
 
@@ -343,7 +346,12 @@ impl Action {
                     return None;
                 }
                 let new_cnt = cnt - 1;
-                match ref_cnt.compare_exchange(cnt, new_cnt, Ordering::AcqRel, Ordering::Acquire) {
+                match ref_cnt.compare_exchange_weak(
+                    cnt,
+                    new_cnt,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                ) {
                     Ok(_) => break,
                     Err(c) => cnt = c,
                 }
