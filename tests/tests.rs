@@ -36,6 +36,24 @@ fn test_return() {
     assert_eq!(f(), 2);
 }
 
+#[tokio::test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
+async fn test_async_return() {
+    async fn async_fn() -> usize {
+        fail_point!("async_return", |s: Option<String>| async {
+            (async {}).await;
+            s.map_or(2, |s| s.parse().unwrap())
+        });
+        0
+    }
+
+    fail::cfg("async_return", "return(1000)").unwrap();
+    assert_eq!(async_fn().await, 1000);
+
+    fail::cfg("async_return", "return").unwrap();
+    assert_eq!(async_fn().await, 2);
+}
+
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_sleep() {
