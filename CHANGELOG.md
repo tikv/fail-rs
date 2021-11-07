@@ -1,3 +1,7 @@
+# 0.5.0 - 2021-11-04
+
+- update rand to 0.8
+
 # 0.4.0 - 2020-04-13
 
 - re-arrange macros to avoid leaking
