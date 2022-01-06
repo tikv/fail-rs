@@ -211,3 +211,36 @@ fn test_list() {
     fail::cfg("list", "return").unwrap();
     assert!(fail::list().contains(&("list".to_string(), "return".to_string())));
 }
+
+#[test]
+fn test_value_adjust() {
+    let f = || -> i32 {
+        let mut var = 1;
+        fail::adjust!("adjust_var", &mut var);
+        var
+    };
+    assert_eq!(f(), 1);
+
+    fail::set_callback("adjust_var", |vari| {
+        *vari = 2;
+    })
+    .unwrap();
+    assert_eq!(f(), 2);
+}
+
+#[test]
+fn test_value_adjust_raii() {
+    let f = || -> i32 {
+        let mut var = 1;
+        fail::adjust!("adjust_var1", &mut var);
+        var
+    };
+    {
+        let _raii = fail::ScopedCallback::new("adjust_var1", |var| {
+            *var = 2;
+        });
+        assert_eq!(f(), 2);
+    }
+
+    assert_eq!(f(), 1);
+}
