@@ -864,9 +864,27 @@ lazy_static::lazy_static! {
     static ref TESTVALUE_REGISTRY: RwLock<HashMap<String, MapEntry>>= Default::default();
 }
 
-/// Set a callback
+/// Set the callback for a test value adjustment.
 ///
-/// Dummy doc
+/// Usage:
+///
+/// ```rust
+/// fn production_code() {
+///     ...
+/// 	let mut var = SomeVar();
+/// 	adjust("adjust_this_var", &mut var);
+/// 	...
+/// }
+///
+/// fn test_code() {
+///     ...
+///     let _raii = ScopedCallback::new("adjust_this_var", |var| {
+/// 	    *var = SomeNewValue();
+///     });
+///     ...
+/// }
+/// ```
+///
 pub fn set_callback<S, T, F>(name: S, mut f: F) -> Result<(), String>
 where
     S: Into<String>,
@@ -935,7 +953,6 @@ where
 }
 
 /// Define a test value adjustment (requires `failpoints` feature).
-///
 #[macro_export]
 #[cfg(feature = "failpoints")]
 macro_rules! adjust {
@@ -945,8 +962,6 @@ macro_rules! adjust {
 }
 
 /// Define a test value adjustment (disabled, see `failpoints` feature).
-///
-/// Dummy doc.
 #[macro_export]
 #[cfg(not(feature = "failpoints"))]
 macro_rules! adjust {
