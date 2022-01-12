@@ -820,24 +820,24 @@ macro_rules! fail_point {
 }
 
 #[derive(Clone)]
-struct SyncCallback1(Arc<Mutex<dyn FnMut(&mut dyn Any) + Send + Sync + 'static>>);
+struct SyncMutCallback1(Arc<Mutex<dyn FnMut(&mut dyn Any) + Send + Sync + 'static>>);
 
-impl Debug for SyncCallback1 {
+impl Debug for SyncMutCallback1 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("SyncCallback1()")
+        f.write_str("SyncMutCallback1()")
     }
 }
 
-impl PartialEq for SyncCallback1 {
+impl PartialEq for SyncMutCallback1 {
     #[allow(clippy::vtable_address_comparisons)]
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
 }
 
-impl SyncCallback1 {
-    fn new(f: Box<dyn FnMut(&mut dyn Any) + Send + Sync>) -> SyncCallback1 {
-        SyncCallback1(Arc::new(Mutex::new(f)))
+impl SyncMutCallback1 {
+    fn new(f: Box<dyn FnMut(&mut dyn Any) + Send + Sync>) -> SyncMutCallback1 {
+        SyncMutCallback1(Arc::new(Mutex::new(f)))
     }
 
     fn run(&mut self, var: &mut dyn Any) {
@@ -848,14 +848,14 @@ impl SyncCallback1 {
 
 struct MapEntry {
     type_id: TypeId,
-    cb: SyncCallback1,
+    cb: SyncMutCallback1,
 }
 
 impl MapEntry {
     fn new(type_id: TypeId, cb: Box<dyn FnMut(&mut dyn Any) + Send + Sync>) -> MapEntry {
         MapEntry {
             type_id: type_id,
-            cb: SyncCallback1::new(cb),
+            cb: SyncMutCallback1::new(cb),
         }
     }
 }
@@ -869,19 +869,17 @@ lazy_static::lazy_static! {
 /// Usage:
 ///
 /// ```rust
+/// use fail::{adjust, ScopedCallback};
+///
 /// fn production_code() {
-///     ...
-/// 	let mut var = SomeVar();
-/// 	adjust("adjust_this_var", &mut var);
-/// 	...
+/// 	let mut var = 1;
+/// 	adjust!("adjust_this_var", &mut var);
 /// }
 ///
 /// fn test_code() {
-///     ...
 ///     let _raii = ScopedCallback::new("adjust_this_var", |var| {
-/// 	    *var = SomeNewValue();
+/// 	    *var = 2; 
 ///     });
-///     ...
 /// }
 /// ```
 ///
