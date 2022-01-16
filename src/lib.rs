@@ -523,10 +523,10 @@ struct FailPointRegistry {
     registry: RwLock<Registry>,
 }
 
-lazy_static::lazy_static! {
-    static ref REGISTRY: FailPointRegistry = FailPointRegistry::default();
-    static ref SCENARIO: Mutex<&'static FailPointRegistry> = Mutex::new(&REGISTRY);
-}
+use once_cell::sync::Lazy;
+
+static REGISTRY: Lazy<FailPointRegistry> = Lazy::new(FailPointRegistry::default);
+static SCENARIO: Lazy<Mutex<&'static FailPointRegistry>> = Lazy::new(|| Mutex::new(&REGISTRY));
 
 /// Test scenario with configured fail points.
 #[derive(Debug)]
