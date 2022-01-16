@@ -10,7 +10,7 @@ homepage = "https://github.com/tikv/fail-rs"
 documentation = "https://docs.rs/fail"
 description = "Fail points for rust."
 categories = ["development-tools::testing"]
-edition = "2018"
+edition = "2021"
 exclude = ["/.github/*", "/.travis.yml", "/appveyor.yml"]
 
 [dependencies]
