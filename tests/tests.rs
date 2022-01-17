@@ -109,11 +109,14 @@ fn test_pause() {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         // pause
-        tx.send(f()).unwrap();
+        f();
+        tx.send(()).unwrap();
         // woken up by new order pause, and then pause again.
-        tx.send(f()).unwrap();
+        f();
+        tx.send(()).unwrap();
         // woken up by remove, and then quit immediately.
-        tx.send(f()).unwrap();
+        f();
+        tx.send(()).unwrap();
     });
 
     assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
