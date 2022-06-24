@@ -719,7 +719,7 @@ impl Drop for FailGuard {
 }
 
 impl FailGuard {
-    /// Configure the actions for a fail point during the lifetime of the returning object.
+    /// Configure the actions for a fail point during the lifetime of the returning `FailGuard`.
     ///
     /// Read documentation of [`cfg`] for more details.
     pub fn new<S: Into<String>>(name: S, actions: &str) -> Result<FailGuard, String> {
@@ -728,10 +728,10 @@ impl FailGuard {
         Ok(FailGuard(name))
     }
 
-    /// Configure the actions for a fail point during the lifetime of the returning object.
+    /// Configure the actions for a fail point during the lifetime of the returning `FailGuard`.
     ///
     /// Read documentation of [`cfg_callback`] for more details.
-    pub fn new_callback<S, F>(name: S, f: F) -> Result<FailGuard, String>
+    pub fn with_callback<S, F>(name: S, f: F) -> Result<FailGuard, String>
     where
         S: Into<String>,
         F: Fn() + Send + Sync + 'static,
