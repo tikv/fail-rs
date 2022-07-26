@@ -708,6 +708,40 @@ pub fn remove<S: AsRef<str>>(name: S) {
     }
 }
 
+/// Configure fail point in RAII style.
+#[derive(Debug)]
+pub struct FailGuard(String);
+
+impl Drop for FailGuard {
+    fn drop(&mut self) {
+        remove(&self.0);
+    }
+}
+
+impl FailGuard {
+    /// Configure the actions for a fail point during the lifetime of the returning `FailGuard`.
+    ///
+    /// Read documentation of [`cfg`] for more details.
+    pub fn new<S: Into<String>>(name: S, actions: &str) -> Result<FailGuard, String> {
+        let name = name.into();
+        cfg(&name, actions)?;
+        Ok(FailGuard(name))
+    }
+
+    /// Configure the actions for a fail point during the lifetime of the returning `FailGuard`.
+    ///
+    /// Read documentation of [`cfg_callback`] for more details.
+    pub fn with_callback<S, F>(name: S, f: F) -> Result<FailGuard, String>
+    where
+        S: Into<String>,
+        F: Fn() + Send + Sync + 'static,
+    {
+        let name = name.into();
+        cfg_callback(&name, f)?;
+        Ok(FailGuard(name))
+    }
+}
+
 fn set(
     registry: &mut HashMap<String, Arc<FailPoint>>,
     name: String,
