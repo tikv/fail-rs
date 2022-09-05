@@ -18,7 +18,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! fail = "0.4"
+//! fail = "0.5"
 //! ```
 //!
 //! Now you can import the `fail_point!` macro from the `fail` crate and use it
