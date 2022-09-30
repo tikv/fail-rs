@@ -838,7 +838,7 @@ macro_rules! fail_point {
     }};
     ($name:expr, $cond:expr, $e:expr) => {{
         if $cond {
-            fail_point!($name, $e);
+            $crate::fail_point!($name, $e);
         }
     }};
 }
