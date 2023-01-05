@@ -126,8 +126,8 @@
 //! fail point will immediately return from the function, optionally with a
 //! configurable value.
 //!
-//! The setup for early return requires a slightly diferent invocation of the
-//! `fail_point!` macro. To illustrate this, let's modify the `do_fallible_work`
+//! The setup for early return is most convenient with the [`try_fail_point`] macro.
+//! To illustrate this, let's modify the `do_fallible_work`
 //! function we used earlier to return a `Result`:
 //!
 //! ```rust
@@ -135,7 +135,7 @@
 //! use std::io;
 //!
 //! fn do_fallible_work() -> io::Result<()> {
-//!     fail_point!("read-dir");
+//!     try_fail_point!("read-dir");
 //!     let _dir: Vec<_> = std::fs::read_dir(".")?.collect();
 //!     // ... do some work on the directory ...
 //!     Ok(())
@@ -150,53 +150,6 @@
 //! }
 //! ```
 //!
-//! This example has more proper Rust error handling, with no unwraps
-//! anywhere. Instead it uses `?` to propagate errors via the `Result` type
-//! return values. This is more realistic Rust code.
-//!
-//! The "read-dir" fail point though is not yet configured to support early
-//! return, so if we attempt to configure it to "return", we'll see an error
-//! like
-//!
-//! ```sh
-//! $ FAILPOINTS=read-dir=return cargo run --features fail/failpoints
-//!     Finished dev [unoptimized + debuginfo] target(s) in 0.13s
-//!      Running `target/debug/failpointtest`
-//! thread 'main' panicked at 'Return is not supported for the fail point "read-dir"', src/main.rs:7:5
-//! note: Run with `RUST_BACKTRACE=1` for a backtrace.
-//! ```
-//!
-//! This error tells us that the "read-dir" fail point is not defined correctly
-//! to support early return, and gives us the line number of that fail point.
-//! What we're missing in the fail point definition is code describring _how_ to
-//! return an error value, and the way we do this is by passing `fail_point!` a
-//! closure that returns the same type as the enclosing function.
-//!
-//! Here's a variation that does so:
-//!
-//! ```rust
-//! # use std::io;
-//! fn do_fallible_work() -> io::Result<()> {
-//!     fail::fail_point!("read-dir", |_| {
-//!         Err(io::Error::new(io::ErrorKind::PermissionDenied, "error"))
-//!     });
-//!     let _dir: Vec<_> = std::fs::read_dir(".")?.collect();
-//!     // ... do some work on the directory ...
-//!     Ok(())
-//! }
-//! ```
-//!
-//! And now if the "read-dir" fail point is configured to "return" we get a
-//! different result:
-//!
-//! ```sh
-//! $ FAILPOINTS=read-dir=return cargo run --features fail/failpoints
-//!    Compiling failpointtest v0.1.0
-//!     Finished dev [unoptimized + debuginfo] target(s) in 2.38s
-//!      Running `target/debug/failpointtest`
-//! Error: Custom { kind: PermissionDenied, error: StringError("error") }
-//! ```
-//!
 //! This time, `do_fallible_work` returned the error defined in our closure,
 //! which propagated all the way up and out of main.
 //!
@@ -207,8 +160,7 @@
 //! panic and return early. But that's not all they can do. To learn more see
 //! the documentation for [`cfg`](fn.cfg.html),
 //! [`cfg_callback`](fn.cfg_callback.html) and
-//! [`fail_point!`](macro.fail_point.html).
-//!
+//! [`fail_point!`](macro.fail_point.html) and [`try_fail_point!`].
 //!
 //! ## Usage considerations
 //!
@@ -227,7 +179,8 @@
 
 use std::collections::HashMap;
 use std::env::VarError;
-use std::fmt::Debug;
+use std::error::Error;
+use std::fmt::{Debug, Display};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, TryLockError};
@@ -425,6 +378,39 @@ impl FromStr for Action {
         };
 
         Ok(Action::new(task, frequency, max_cnt))
+    }
+}
+
+/// A synthetic error created as part of [`try_fail_point!`].
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct ReturnError(pub String);
+
+impl ReturnError {
+    const SYNTHETIC: &str = "synthetic failpoint error";
+}
+
+impl From<Option<String>> for ReturnError {
+    fn from(msg: Option<String>) -> Self {
+        Self(msg.unwrap_or_else(|| Self::SYNTHETIC.to_string()))
+    }
+}
+
+impl Display for ReturnError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl Error for ReturnError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        None
+    }
+}
+
+impl From<ReturnError> for std::io::Error {
+    fn from(e: ReturnError) -> Self {
+        std::io::Error::new(std::io::ErrorKind::Other, e.0)
     }
 }
 
@@ -843,6 +829,44 @@ macro_rules! fail_point {
     }};
 }
 
+/// A variant of [`fail_point`] designed for a function that returns [`std::result::Result`].
+///
+/// 1. A failpoint that supports e.g. `FAILPOINTS=a-fail-point=return` to return a synthetic error
+///
+/// ```rust
+/// # #[macro_use] extern crate fail;
+/// fn fallible_function() -> Result<u32, Box<dyn std::error::Error>> {
+///     try_fail_point!("a-fail-point");
+///     Ok(42)
+/// }
+/// ```
+///
+/// Like [`fail_point`], this also has a form which accepts a runtime condition:
+///
+/// 2. A fail point with conditional execution:
+///
+/// ```rust
+/// # #[macro_use] extern crate fail;
+/// fn function_conditional(enable: bool) -> Result<u32, Box<dyn std::error::Error>> {
+///     try_fail_point!("fail-point-3", enable);
+///     Ok(42)
+/// }
+/// ```
+#[macro_export]
+#[cfg(feature = "failpoints")]
+macro_rules! try_fail_point {
+    ($name:expr) => {{
+        if let Some(e) = $crate::eval($name, |msg| $crate::ReturnError::from(msg)) {
+            return Err(From::from(e));
+        }
+    }};
+    ($name:expr, $cond:expr) => {{
+        if $cond {
+            $crate::try_fail_point!($name);
+        }
+    }};
+}
+
 /// Define a fail point (disabled, see `failpoints` feature).
 #[macro_export]
 #[cfg(not(feature = "failpoints"))]
@@ -850,6 +874,14 @@ macro_rules! fail_point {
     ($name:expr, $e:expr) => {{}};
     ($name:expr) => {{}};
     ($name:expr, $cond:expr, $e:expr) => {{}};
+}
+
+/// Define a fail point for a Result-returning function (disabled, see `failpoints` feature).
+#[macro_export]
+#[cfg(not(feature = "failpoints"))]
+macro_rules! try_fail_point {
+    ($name:expr) => {{}};
+    ($name:expr, $cond:expr) => {{}};
 }
 
 #[cfg(test)]
@@ -1030,6 +1062,27 @@ mod tests {
         for case in fail_cases {
             assert!(case.parse::<Action>().is_err());
         }
+    }
+
+    #[test]
+    #[cfg(feature = "failpoints")]
+    fn test_try_failpoint() -> anyhow::Result<()> {
+        fn test_anyhow() -> anyhow::Result<()> {
+            try_fail_point!("tryfail-with-result");
+            Ok(())
+        }
+        fn test_stderr() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+            try_fail_point!("tryfail-with-result-2");
+            Ok(())
+        }
+        fn test_stdioerr() -> std::io::Result<()> {
+            try_fail_point!("tryfail-with-result-3");
+            Ok(())
+        }
+        test_anyhow()?;
+        test_stderr().map_err(anyhow::Error::msg)?;
+        test_stdioerr()?;
+        Ok(())
     }
 
     // This case should be tested as integration case, but when calling `teardown` other cases
