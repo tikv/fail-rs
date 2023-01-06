@@ -721,7 +721,7 @@ impl Drop for FailGuard {
 impl FailGuard {
     /// Configure the actions for a fail point during the lifetime of the returning `FailGuard`.
     ///
-    /// Read documentation of [`cfg`] for more details.
+    /// Read documentation of [`cfg()`] for more details.
     pub fn new<S: Into<String>>(name: S, actions: &str) -> Result<FailGuard, String> {
         let name = name.into();
         cfg(&name, actions)?;
