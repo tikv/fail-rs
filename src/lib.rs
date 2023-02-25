@@ -534,6 +534,22 @@ pub struct FailScenario<'a> {
     scenario_guard: MutexGuard<'a, &'static FailPointRegistry>,
 }
 
+/// Customize behaviors setting up [`FailScenario`].
+#[non_exhaustive]
+#[derive(Debug)]
+pub struct SetupOptions {
+    /// Environment variable to use. Default: `"FAILPOINTS"`.
+    pub env_var_name: &'static str,
+}
+
+impl Default for SetupOptions {
+    fn default() -> Self {
+        Self {
+            env_var_name: "FAILPOINTS",
+        }
+    }
+}
+
 impl<'a> FailScenario<'a> {
     /// Set up the system for a fail points scenario.
     ///
@@ -555,12 +571,18 @@ impl<'a> FailScenario<'a> {
     ///
     /// Panics if an action is not formatted correctly.
     pub fn setup() -> Self {
+        Self::setup_with_options(Default::default())
+    }
+
+    /// Similar to [`FailScenario::setup`] but takes an extra [`SetupOptions`]
+    /// for customization.
+    pub fn setup_with_options(options: SetupOptions) -> Self {
         // Cleanup first, in case of previous failed/panic'ed test scenarios.
         let scenario_guard = SCENARIO.lock().unwrap_or_else(|e| e.into_inner());
         let mut registry = scenario_guard.registry.write().unwrap();
         Self::cleanup(&mut registry);
 
-        let failpoints = match env::var("FAILPOINTS") {
+        let failpoints = match env::var(options.env_var_name) {
             Ok(s) => s,
             Err(VarError::NotPresent) => return Self { scenario_guard },
             Err(e) => panic!("invalid failpoints: {:?}", e),
@@ -1061,5 +1083,21 @@ mod tests {
         scenario.teardown();
         assert_eq!(rx.recv_timeout(Duration::from_millis(500)).unwrap(), 0);
         assert_eq!(f1(), 0);
+    }
+
+    #[test]
+    #[cfg_attr(not(feature = "failpoints"), ignore)]
+    fn test_setup_with_customized_env_name() {
+        let f1 = || {
+            fail_point!("setup_with_customized_env_name", |_| 1);
+            0
+        };
+        env::set_var("FOO_FAILPOINTS", "setup_with_customized_env_name=return");
+        let scenario = FailScenario::setup_with_options(SetupOptions {
+            env_var_name: "FOO_FAILPOINTS",
+            ..Default::default()
+        });
+        assert_eq!(f1(), 1);
+        scenario.teardown();
     }
 }
