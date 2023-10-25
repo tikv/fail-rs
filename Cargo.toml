@@ -14,12 +14,18 @@ edition = "2021"
 exclude = ["/.github/*", "/.travis.yml", "/appveyor.yml"]
 
 [dependencies]
+futures = { version = "0.3", optional = true }
 log = { version = "0.4", features = ["std"] }
 once_cell = "1.9.0"
 rand = "0.8"
+tokio = { version = "1.32", features = [ "sync" ] }
+
+[dev-dependencies]
+tokio = { version = "1.32", features = [ "sync", "rt-multi-thread", "time", "macros" ] }
 
 [features]
 failpoints = []
+async = [ "futures" ]
 
 [package.metadata.docs.rs]
 all-features = true
