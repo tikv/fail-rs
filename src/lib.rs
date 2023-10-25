@@ -523,10 +523,11 @@ struct FailPointRegistry {
     registry: RwLock<Registry>,
 }
 
-use once_cell::sync::Lazy;
+use once_cell::sync::{Lazy, OnceCell};
 
-static REGISTRY: Lazy<FailPointRegistry> = Lazy::new(FailPointRegistry::default);
-static SCENARIO: Lazy<Mutex<&'static FailPointRegistry>> = Lazy::new(|| Mutex::new(&REGISTRY));
+static REGISTRY: OnceCell<FailPointRegistry> = OnceCell::new();
+static SCENARIO: Lazy<Mutex<&'static FailPointRegistry>> =
+    Lazy::new(|| Mutex::new(REGISTRY.get_or_init(Default::default)));
 
 /// Test scenario with configured fail points.
 #[derive(Debug)]
@@ -624,7 +625,11 @@ pub const fn has_failpoints() -> bool {
 ///
 /// Return a vector of `(name, actions)` pairs.
 pub fn list() -> Vec<(String, String)> {
-    let registry = REGISTRY.registry.read().unwrap();
+    let registry = if let Some(r) = REGISTRY.get() {
+        r.registry.read().unwrap()
+    } else {
+        return Vec::new();
+    };
     registry
         .iter()
         .map(|(name, fp)| (name.to_string(), fp.actions_str.read().unwrap().clone()))
@@ -633,8 +638,13 @@ pub fn list() -> Vec<(String, String)> {
 
 #[doc(hidden)]
 pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
+    let registry = if let Some(r) = REGISTRY.get() {
+        &r.registry
+    } else {
+        return None;
+    };
     let p = {
-        let registry = REGISTRY.registry.read().unwrap();
+        let registry = registry.read().unwrap();
         match registry.get(name) {
             None => return None,
             Some(p) => p.clone(),
@@ -674,7 +684,11 @@ pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
 /// A call to `cfg` with a particular fail point name overwrites any existing actions for
 /// that fail point, including those set via the `FAILPOINTS` environment variable.
 pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
-    let mut registry = REGISTRY.registry.write().unwrap();
+    let mut registry = REGISTRY
+        .get_or_init(Default::default)
+        .registry
+        .write()
+        .unwrap();
     set(&mut registry, name.into(), actions)
 }
 
@@ -687,7 +701,11 @@ where
     S: Into<String>,
     F: Fn() + Send + Sync + 'static,
 {
-    let mut registry = REGISTRY.registry.write().unwrap();
+    let mut registry = REGISTRY
+        .get_or_init(Default::default)
+        .registry
+        .write()
+        .unwrap();
     let p = registry
         .entry(name.into())
         .or_insert_with(|| Arc::new(FailPoint::new()));
@@ -701,7 +719,11 @@ where
 ///
 /// If the fail point doesn't exist, nothing will happen.
 pub fn remove<S: AsRef<str>>(name: S) {
-    let mut registry = REGISTRY.registry.write().unwrap();
+    let mut registry = if let Some(r) = REGISTRY.get() {
+        r.registry.write().unwrap()
+    } else {
+        return;
+    };
     if let Some(p) = registry.remove(name.as_ref()) {
         // wake up all pause failpoint.
         p.set_actions("", vec![]);
