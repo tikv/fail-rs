@@ -1,3 +1,13 @@
+# 0.5.1 - 2022-10-08
+
+- Switch to 2021 edition and use once cell (#61)
+- Support configuring fail point in RAII style (#62)
+- Fix recursive macro invocation (#66)
+
+# 0.5.0 - 2021-11-04
+
+- update rand to 0.8
+
 # 0.4.0 - 2020-04-13
 
 - re-arrange macros to avoid leaking

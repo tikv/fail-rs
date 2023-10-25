@@ -1,6 +1,6 @@
 [package]
 name = "fail"
-version = "0.4.0"
+version = "0.5.1"
 authors = ["The TiKV Project Developers"]
 license = "Apache-2.0"
 keywords = ["failpoints", "fail"]
@@ -10,12 +10,12 @@ homepage = "https://github.com/tikv/fail-rs"
 documentation = "https://docs.rs/fail"
 description = "Fail points for rust."
 categories = ["development-tools::testing"]
-edition = "2018"
+edition = "2021"
 exclude = ["/.github/*", "/.travis.yml", "/appveyor.yml"]
 
 [dependencies]
 log = { version = "0.4", features = ["std"] }
-lazy_static = "1.2"
+once_cell = "1.9.0"
 rand = "0.8"
 
 [dev-dependencies]
