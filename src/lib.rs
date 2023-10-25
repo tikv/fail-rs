@@ -268,7 +268,7 @@ mod async_imp {
         }
     }
 
-    /// `fail_point` but with support for async callback.
+    /// `fail_point` but with support for async callback and pause.
     #[macro_export]
     #[cfg(all(feature = "failpoints", feature = "async"))]
     macro_rules! async_fail_point {
@@ -373,7 +373,7 @@ mod async_imp {
                 Task::Pause => unreachable!(),
                 Task::Yield => thread::yield_now(),
                 Task::Delay(_) => panic!(
-                    "fail does not support async delay, please use a async closure to sleep."
+                    "fail does not support async delay, please use a async closure to delay."
                 ),
                 Task::Callback(f) => {
                     f.run();
@@ -612,6 +612,7 @@ impl FailPoint {
 
     fn set_actions(&self, actions_str: &str, actions: Vec<Action>) {
         loop {
+            #[cfg(feature = "async")]
             self.async_pause_notify.notify_waiters();
             // TODO: maybe busy waiting here.
             match self.actions.try_write() {
@@ -623,11 +624,9 @@ impl FailPoint {
                 }
                 Err(e) => panic!("unexpected poison: {:?}", e),
             }
-            {
-                let mut guard = self.pause.lock().unwrap();
-                *guard = false;
-                self.pause_notifier.notify_all();
-            }
+            let mut guard = self.pause.lock().unwrap();
+            *guard = false;
+            self.pause_notifier.notify_all();
         }
     }
 
@@ -674,7 +673,10 @@ impl FailPoint {
             Task::Callback(f) => {
                 f.run();
             }
-            Task::CallbackAsync(_) => unreachable!(),
+            #[cfg(feature = "async")]
+            Task::CallbackAsync(_) => panic!(
+                "to use async callback, please enable `async` feature and use `async_fail_point`"
+            ),
         }
         None
     }
@@ -1229,7 +1231,8 @@ mod tests {
         assert_eq!(f1(), 0);
     }
 
-    #[cfg_attr(not(all(feature = "failpoints", feature = "async")), ignore)]
+    #[cfg(feature = "async")]
+    #[cfg_attr(not(feature = "failpoints"), ignore)]
     #[tokio::test]
     async fn test_async_failpoint() {
         use std::time::Duration;
