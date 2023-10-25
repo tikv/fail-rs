@@ -873,6 +873,15 @@ macro_rules! fail_point {
     ($name:expr, $cond:expr, $e:expr) => {{}};
 }
 
+/// Define an async fail point (disabled, see `failpoints` feature).
+#[macro_export]
+#[cfg(not(feature = "failpoints"))]
+macro_rules! async_fail_point {
+    ($name:expr, $e:expr) => {{}};
+    ($name:expr) => {{}};
+    ($name:expr, $cond:expr, $e:expr) => {{}};
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
