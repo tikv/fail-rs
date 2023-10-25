@@ -5,7 +5,7 @@ use std::sync::*;
 use std::time::*;
 use std::*;
 
-use fail::fail_point;
+use fail::{async_fail_point, fail_point};
 
 #[test]
 fn test_off() {
@@ -40,7 +40,7 @@ fn test_return() {
 #[test]
 fn test_async_return() {
     async fn async_fn() -> usize {
-        fail_point!("async_return", move |s: Option<String>| async {
+        async_fail_point!("async_return", move |s: Option<String>| async {
             (async {}).await;
             s.map_or(2, |s| s.parse().unwrap())
         });
@@ -60,7 +60,7 @@ fn test_async_return() {
 #[test]
 fn test_async_move_return() {
     async fn async_fn() -> usize {
-        fail_point!("async_return", |s: Option<String>| async move {
+        async_fail_point!("async_return", |s: Option<String>| async move {
             (async {}).await;
             s.map_or(2, |s| s.parse().unwrap())
         });

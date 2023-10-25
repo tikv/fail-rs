@@ -797,18 +797,6 @@ macro_rules! fail_point {
             panic!("Return is not supported for the fail point \"{}\"", $name);
         });
     }};
-    ($name:expr, $($mov:ident)? | $arg:ident  $(: $t:ty )? | async $block:tt ) => {{
-        if let Some(res) = $crate::eval($name, { $($mov)? | $arg $(: $t)?| async $block}) {
-            ();
-            return res.await;
-        }
-    }};
-    ($name:expr, $($mov:ident)? | $arg:ident  $(: $t:ty )? | async move $block:tt ) => {{
-        if let Some(res) = $crate::eval($name, { $($mov)? | $arg $(: $t)?| async move $block}) {
-            ();
-            return res.await;
-        }
-    }};
     ($name:expr, $e:expr) => {{
         if let Some(res) = $crate::eval($name, $e) {
             return res;
@@ -817,6 +805,27 @@ macro_rules! fail_point {
     ($name:expr, $cond:expr, $e:expr) => {{
         if $cond {
             fail_point!($name, $e);
+        }
+    }};
+}
+
+/// Like [fail_point], but accept a future.
+#[macro_export]
+#[cfg(feature = "failpoints")]
+macro_rules! async_fail_point {
+    ($name:expr) => {{
+        $crate::eval($name, |_| {
+            panic!("Return is not supported for the fail point \"{}\"", $name);
+        });
+    }};
+    ($name:expr, $e:expr) => {{
+        if let Some(res) = $crate::eval($name, $e) {
+            return res.await;
+        }
+    }};
+    ($name:expr, $cond:expr, $e:expr) => {{
+        if $cond {
+            async_fail_point!($name, $e);
         }
     }};
 }
