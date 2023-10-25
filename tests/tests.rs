@@ -36,9 +36,9 @@ fn test_return() {
     assert_eq!(f(), 2);
 }
 
-#[tokio::test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
-async fn test_async_return() {
+#[test]
+fn test_async_return() {
     async fn async_fn() -> usize {
         fail_point!("async_return", move |s: Option<String>| async {
             (async {}).await;
@@ -47,16 +47,18 @@ async fn test_async_return() {
         0
     }
 
-    fail::cfg("async_return", "return(1000)").unwrap();
-    assert_eq!(async_fn().await, 1000);
+    futures_executor::block_on(async move {
+        fail::cfg("async_return", "return(1000)").unwrap();
+        assert_eq!(async_fn().await, 1000);
 
-    fail::cfg("async_return", "return").unwrap();
-    assert_eq!(async_fn().await, 2);
+        fail::cfg("async_return", "return").unwrap();
+        assert_eq!(async_fn().await, 2);
+    })
 }
 
-#[tokio::test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
-async fn test_async_move_return() {
+#[test]
+fn test_async_move_return() {
     async fn async_fn() -> usize {
         fail_point!("async_return", |s: Option<String>| async move {
             (async {}).await;
@@ -65,11 +67,13 @@ async fn test_async_move_return() {
         0
     }
 
-    fail::cfg("async_return", "return(1000)").unwrap();
-    assert_eq!(async_fn().await, 1000);
+    futures_executor::block_on(async move {
+        fail::cfg("async_return", "return(1000)").unwrap();
+        assert_eq!(async_fn().await, 1000);
 
-    fail::cfg("async_return", "return").unwrap();
-    assert_eq!(async_fn().await, 2);
+        fail::cfg("async_return", "return").unwrap();
+        assert_eq!(async_fn().await, 2);
+    })
 }
 
 #[test]
