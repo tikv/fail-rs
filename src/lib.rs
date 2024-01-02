@@ -244,7 +244,7 @@ impl Debug for SyncCallback {
 }
 
 impl PartialEq for SyncCallback {
-    #[allow(clippy::vtable_address_comparisons)]
+    #[allow(ambiguous_wide_pointer_comparisons)]
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
