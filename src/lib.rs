@@ -72,7 +72,7 @@
 //!
 //! ## Usage in tests
 //!
-//! The previous example triggers a fail point by modifying the `FAILPOINT`
+//! The previous example triggers a fail point by modifying the `FAILPOINTS`
 //! environment variable. In practice, you'll often want to trigger fail points
 //! programmatically, in unit tests.
 //! Fail points are global resources, and Rust tests run in parallel,
