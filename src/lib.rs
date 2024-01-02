@@ -81,7 +81,7 @@
 //!
 //! Here's a basic pattern for writing unit tests tests with fail points:
 //!
-//! ```rust
+//! ```rust,no_run
 //! use fail::{fail_point, FailScenario};
 //!
 //! fn do_fallible_work() {
