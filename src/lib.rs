@@ -72,7 +72,7 @@
 //!
 //! ## Usage in tests
 //!
-//! The previous example triggers a fail point by modifying the `FAILPOINT`
+//! The previous example triggers a fail point by modifying the `FAILPOINTS`
 //! environment variable. In practice, you'll often want to trigger fail points
 //! programmatically, in unit tests.
 //! Fail points are global resources, and Rust tests run in parallel,
@@ -81,7 +81,7 @@
 //!
 //! Here's a basic pattern for writing unit tests tests with fail points:
 //!
-//! ```rust
+//! ```rust,no_run
 //! use fail::{fail_point, FailScenario};
 //!
 //! fn do_fallible_work() {
@@ -244,7 +244,6 @@ impl Debug for SyncCallback {
 }
 
 impl PartialEq for SyncCallback {
-    #[allow(clippy::vtable_address_comparisons)]
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
