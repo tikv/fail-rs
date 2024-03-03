@@ -5,7 +5,7 @@ use std::sync::*;
 use std::time::*;
 use std::*;
 
-use fail::fail_point;
+use fail::{async_fail_point, fail_point};
 
 #[test]
 fn test_off() {
@@ -34,6 +34,46 @@ fn test_return() {
 
     fail::cfg("return", "return").unwrap();
     assert_eq!(f(), 2);
+}
+
+#[cfg_attr(not(feature = "failpoints"), ignore)]
+#[test]
+fn test_async_return() {
+    async fn async_fn() -> usize {
+        async_fail_point!("async_return", move |s: Option<String>| async {
+            (async {}).await;
+            s.map_or(2, |s| s.parse().unwrap())
+        });
+        0
+    }
+
+    futures_executor::block_on(async move {
+        fail::cfg("async_return", "return(1000)").unwrap();
+        assert_eq!(async_fn().await, 1000);
+
+        fail::cfg("async_return", "return").unwrap();
+        assert_eq!(async_fn().await, 2);
+    })
+}
+
+#[cfg_attr(not(feature = "failpoints"), ignore)]
+#[test]
+fn test_async_move_return() {
+    async fn async_fn() -> usize {
+        async_fail_point!("async_return", |s: Option<String>| async move {
+            (async {}).await;
+            s.map_or(2, |s| s.parse().unwrap())
+        });
+        0
+    }
+
+    futures_executor::block_on(async move {
+        fail::cfg("async_return", "return(1000)").unwrap();
+        assert_eq!(async_fn().await, 1000);
+
+        fail::cfg("async_return", "return").unwrap();
+        assert_eq!(async_fn().await, 2);
+    })
 }
 
 #[test]

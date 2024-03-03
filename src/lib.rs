@@ -842,10 +842,40 @@ macro_rules! fail_point {
     }};
 }
 
+/// Like [fail_point], but accept a future.
+#[macro_export]
+#[cfg(feature = "failpoints")]
+macro_rules! async_fail_point {
+    ($name:expr) => {{
+        $crate::eval($name, |_| {
+            panic!("Return is not supported for the fail point \"{}\"", $name);
+        });
+    }};
+    ($name:expr, $e:expr) => {{
+        if let Some(res) = $crate::eval($name, $e) {
+            return res.await;
+        }
+    }};
+    ($name:expr, $cond:expr, $e:expr) => {{
+        if $cond {
+            async_fail_point!($name, $e);
+        }
+    }};
+}
+
 /// Define a fail point (disabled, see `failpoints` feature).
 #[macro_export]
 #[cfg(not(feature = "failpoints"))]
 macro_rules! fail_point {
+    ($name:expr, $e:expr) => {{}};
+    ($name:expr) => {{}};
+    ($name:expr, $cond:expr, $e:expr) => {{}};
+}
+
+/// Define an async fail point (disabled, see `failpoints` feature).
+#[macro_export]
+#[cfg(not(feature = "failpoints"))]
+macro_rules! async_fail_point {
     ($name:expr, $e:expr) => {{}};
     ($name:expr) => {{}};
     ($name:expr, $cond:expr, $e:expr) => {{}};
