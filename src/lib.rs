@@ -229,7 +229,7 @@ use std::collections::HashMap;
 use std::env::VarError;
 use std::fmt::Debug;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, TryLockError};
 use std::time::{Duration, Instant};
 use std::{env, thread};
@@ -527,6 +527,9 @@ use once_cell::sync::Lazy;
 static REGISTRY: Lazy<FailPointRegistry> = Lazy::new(FailPointRegistry::default);
 static SCENARIO: Lazy<Mutex<&'static FailPointRegistry>> = Lazy::new(|| Mutex::new(&REGISTRY));
 
+#[doc(hidden)]
+pub static REGISTRY_IS_EMPTY: AtomicBool = AtomicBool::new(true);
+
 /// Test scenario with configured fail points.
 #[derive(Debug)]
 pub struct FailScenario<'a> {
@@ -579,6 +582,7 @@ impl<'a> FailScenario<'a> {
                 }
             }
         }
+        update_registry_is_empty(&registry);
         Self { scenario_guard }
     }
 
@@ -600,6 +604,7 @@ impl<'a> FailScenario<'a> {
             p.set_actions("", vec![]);
         }
         registry.clear();
+        update_registry_is_empty(registry);
     }
 }
 
@@ -674,7 +679,9 @@ pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
 /// that fail point, including those set via the `FAILPOINTS` environment variable.
 pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
     let mut registry = REGISTRY.registry.write().unwrap();
-    set(&mut registry, name.into(), actions)
+    set(&mut registry, name.into(), actions)?;
+    update_registry_is_empty(&registry);
+    Ok(())
 }
 
 /// Configure the actions for a fail point at runtime.
@@ -693,6 +700,7 @@ where
     let action = Action::from_callback(f);
     let actions = vec![action];
     p.set_actions("callback", actions);
+    update_registry_is_empty(&registry);
     Ok(())
 }
 
@@ -761,6 +769,10 @@ fn set(
     Ok(())
 }
 
+fn update_registry_is_empty(registry: &HashMap<String, Arc<FailPoint>>) {
+    REGISTRY_IS_EMPTY.store(registry.is_empty(), Ordering::Release);
+}
+
 /// Define a fail point (requires `failpoints` feature).
 ///
 /// The `fail_point!` macro has three forms, and they all take a name as the
@@ -826,13 +838,17 @@ fn set(
 #[cfg(feature = "failpoints")]
 macro_rules! fail_point {
     ($name:expr) => {{
-        $crate::eval($name, |_| {
-            panic!("Return is not supported for the fail point \"{}\"", $name);
-        });
+        if !$crate::REGISTRY_IS_EMPTY.load(::std::sync::atomic::Ordering::Acquire) {
+            $crate::eval($name, |_| {
+                panic!("Return is not supported for the fail point \"{}\"", $name);
+            });
+        }
     }};
     ($name:expr, $e:expr) => {{
-        if let Some(res) = $crate::eval($name, $e) {
-            return res;
+        if !$crate::REGISTRY_IS_EMPTY.load(::std::sync::atomic::Ordering::Acquire) {
+            if let Some(res) = $crate::eval($name, $e) {
+                return res;
+            }
         }
     }};
     ($name:expr, $cond:expr, $e:expr) => {{
