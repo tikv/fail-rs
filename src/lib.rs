@@ -427,7 +427,7 @@ impl FromStr for Action {
     }
 }
 
-#[cfg_attr(feature = "cargo-clippy", allow(clippy::mutex_atomic))]
+#[allow(clippy::mutex_atomic)]
 #[derive(Debug)]
 struct FailPoint {
     pause: Mutex<bool>,
@@ -436,7 +436,7 @@ struct FailPoint {
     actions_str: RwLock<String>,
 }
 
-#[cfg_attr(feature = "cargo-clippy", allow(clippy::mutex_atomic))]
+#[allow(clippy::mutex_atomic)]
 impl FailPoint {
     fn new() -> FailPoint {
         FailPoint {
@@ -465,7 +465,7 @@ impl FailPoint {
         }
     }
 
-    #[cfg_attr(feature = "cargo-clippy", allow(clippy::option_option))]
+    #[allow(clippy::option_option)]
     fn eval(&self, name: &str) -> Option<Option<String>> {
         let task = {
             let actions = self.actions.read().unwrap();
