@@ -654,8 +654,8 @@ pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
 /// times the action can be triggered. The supported values of `task` are:
 ///
 /// - `off`, the fail point will do nothing.
-/// - `return(arg)`, return early when the fail point is triggered. `arg` is passed to `$e` (
-///   defined via the `fail_point!` macro) as a string.
+/// - `return(arg)`, return early when the fail point is triggered. `arg` is passed to `$e`
+///   (defined via the `fail_point!` macro) as a string.
 /// - `sleep(milliseconds)`, sleep for the specified time.
 /// - `panic(msg)`, panic with the message.
 /// - `print(msg)`, log the message, using the `log` crate, at the `info` level.
