@@ -603,7 +603,7 @@ impl<'a> FailScenario<'a> {
     }
 }
 
-impl<'a> Drop for FailScenario<'a> {
+impl Drop for FailScenario<'_> {
     fn drop(&mut self) {
         let mut registry = self.scenario_guard.registry.write().unwrap();
         Self::cleanup(&mut registry)
