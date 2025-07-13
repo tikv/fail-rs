@@ -388,7 +388,7 @@ impl FromStr for Action {
         if let Some(second) = second {
             remain = second;
             match first.parse::<f32>() {
-                Err(e) => return Err(format!("failed to parse frequency: {}", e)),
+                Err(e) => return Err(format!("failed to parse frequency: {e}")),
                 Ok(freq) => frequency = freq / 100.0,
             }
         }
@@ -398,7 +398,7 @@ impl FromStr for Action {
         if let Some(second) = second {
             remain = second;
             match first.parse() {
-                Err(e) => return Err(format!("failed to parse count: {}", e)),
+                Err(e) => return Err(format!("failed to parse count: {e}")),
                 Ok(cnt) => max_cnt = Some(cnt),
             }
         }
@@ -406,7 +406,7 @@ impl FromStr for Action {
         let parse_timeout = || match args {
             None => Err("sleep require timeout".to_owned()),
             Some(timeout_str) => match timeout_str.parse() {
-                Err(e) => Err(format!("failed to parse timeout: {}", e)),
+                Err(e) => Err(format!("failed to parse timeout: {e}")),
                 Ok(timeout) => Ok(timeout),
             },
         };
@@ -420,7 +420,7 @@ impl FromStr for Action {
             "pause" => Task::Pause,
             "yield" => Task::Yield,
             "delay" => Task::Delay(parse_timeout()?),
-            _ => return Err(format!("unrecognized command {:?}", remain)),
+            _ => return Err(format!("unrecognized command {remain:?}")),
         };
 
         Ok(Action::new(task, frequency, max_cnt))
@@ -457,7 +457,7 @@ impl FailPoint {
                     *self.actions_str.write().unwrap() = actions_str.to_string();
                     return;
                 }
-                Err(e) => panic!("unexpected poison: {:?}", e),
+                Err(e) => panic!("unexpected poison: {e:?}"),
             }
             let mut guard = self.pause.lock().unwrap();
             *guard = false;
@@ -491,12 +491,12 @@ impl FailPoint {
             Task::Return(s) => return Some(s),
             Task::Sleep(t) => thread::sleep(Duration::from_millis(t)),
             Task::Panic(msg) => match msg {
-                Some(ref msg) => panic!("{}", msg),
-                None => panic!("failpoint {} panic", name),
+                Some(ref msg) => panic!("{msg}"),
+                None => panic!("failpoint {name} panic"),
             },
             Task::Print(msg) => match msg {
-                Some(ref msg) => log::info!("{}", msg),
-                None => log::info!("failpoint {} executed.", name),
+                Some(ref msg) => log::info!("{msg}"),
+                None => log::info!("failpoint {name} executed."),
             },
             Task::Pause => unreachable!(),
             Task::Yield => thread::yield_now(),
@@ -562,7 +562,7 @@ impl<'a> FailScenario<'a> {
         let failpoints = match env::var("FAILPOINTS") {
             Ok(s) => s,
             Err(VarError::NotPresent) => return Self { scenario_guard },
-            Err(e) => panic!("invalid failpoints: {:?}", e),
+            Err(e) => panic!("invalid failpoints: {e:?}"),
         };
         for mut cfg in failpoints.trim().split(';') {
             cfg = cfg.trim();
@@ -571,10 +571,10 @@ impl<'a> FailScenario<'a> {
             }
             let (name, order) = partition(cfg, '=');
             match order {
-                None => panic!("invalid failpoint: {:?}", cfg),
+                None => panic!("invalid failpoint: {cfg:?}"),
                 Some(order) => {
                     if let Err(e) = set(&mut registry, name.to_owned(), order) {
-                        panic!("unable to configure failpoint \"{}\": {}", name, e);
+                        panic!("unable to configure failpoint \"{name}\": {e}");
                     }
                 }
             }
@@ -959,16 +959,16 @@ mod tests {
     #[test]
     fn test_frequency_and_count() {
         let point = FailPoint::new();
-        point.set_actions("", vec![Action::new(Task::Return(None), 0.8, Some(100))]);
+        point.set_actions("", vec![Action::new(Task::Return(None), 0.8, Some(500))]);
         let mut count = 0;
         let mut times = 0f64;
-        while count < 100 {
+        while count < 500 {
             if point.eval("test_fail_point_frequency").is_some() {
                 count += 1;
             }
             times += 1f64;
         }
-        assert!(100.0 / 0.9 < times && times < 100.0 / 0.7, "{}", times);
+        assert!(500.0 / 0.9 < times && times < 500.0 / 0.7, "{times}");
         for _ in 0..times as u64 {
             assert!(point.eval("test_fail_point_frequency").is_none());
         }
