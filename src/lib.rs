@@ -634,10 +634,7 @@ pub fn list() -> Vec<(String, String)> {
 pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
     let p = {
         let registry = REGISTRY.registry.read().unwrap();
-        match registry.get(name) {
-            None => return None,
-            Some(p) => p.clone(),
-        }
+        registry.get(name)?.clone()
     };
     p.eval(name).map(f)
 }
