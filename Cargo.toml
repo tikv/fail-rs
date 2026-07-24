@@ -1,6 +1,6 @@
 [package]
 name = "fail"
-version = "0.5.1"
+version = "0.6.0"
 authors = ["The TiKV Project Developers"]
 license = "Apache-2.0"
 keywords = ["failpoints", "fail"]
@@ -20,6 +20,16 @@ rand = "0.8"
 
 [features]
 failpoints = []
+# Automatically prefix fail point names with the name of the crate the fail point
+# is currently located.
+#
+# This can be used to prevent conflicting fail points from two seperate libraries
+# being triggered accidentally.
+#
+# WARNING:
+# This feature should *NOT* be enabled outside of tests/dev-dependencies
+# due to crate features being additive in nature.
+crate-isolation = []
 
 [package.metadata.docs.rs]
 all-features = true

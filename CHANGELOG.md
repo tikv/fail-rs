@@ -1,3 +1,7 @@
+# 0.6.0 - 2025-08-31
+
+- Add `crate-isolation` feature for crate seperation of fail points (#85)
+
 # 0.5.1 - 2022-10-08
 
 - Switch to 2021 edition and use once cell (#61)

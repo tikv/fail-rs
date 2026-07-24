@@ -8,6 +8,7 @@ use std::*;
 use fail::fail_point;
 
 #[test]
+#[cfg_attr(feature = "crate-isolation", ignore)]
 fn test_off() {
     let f = || {
         fail_point!("off", |_| 2);
@@ -21,6 +22,7 @@ fn test_off() {
 
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg_attr(feature = "crate-isolation", ignore)]
 fn test_return() {
     let f = || {
         fail_point!("return", |s: Option<String>| s
@@ -38,6 +40,7 @@ fn test_return() {
 
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg_attr(feature = "crate-isolation", ignore)]
 fn test_sleep() {
     let f = || {
         fail_point!("sleep");
@@ -55,6 +58,7 @@ fn test_sleep() {
 #[test]
 #[should_panic]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg_attr(feature = "crate-isolation", ignore)]
 fn test_panic() {
     let f = || {
         fail_point!("panic");
@@ -65,6 +69,7 @@ fn test_panic() {
 
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg_attr(feature = "crate-isolation", ignore)]
 fn test_print() {
     struct LogCollector(Arc<Mutex<Vec<String>>>);
     impl log::Log for LogCollector {
@@ -99,6 +104,7 @@ fn test_print() {
 
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg_attr(feature = "crate-isolation", ignore)]
 fn test_pause() {
     let f = || {
         fail_point!("pause");
@@ -131,6 +137,7 @@ fn test_pause() {
 }
 
 #[test]
+#[cfg_attr(feature = "crate-isolation", ignore)]
 fn test_yield() {
     let f = || {
         fail_point!("yield");
@@ -141,6 +148,7 @@ fn test_yield() {
 
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg_attr(feature = "crate-isolation", ignore)]
 fn test_callback() {
     let f1 = || {
         fail_point!("cb");
@@ -162,6 +170,7 @@ fn test_callback() {
 
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg_attr(feature = "crate-isolation", ignore)]
 fn test_delay() {
     let f = || fail_point!("delay");
     let timer = Instant::now();
@@ -172,6 +181,7 @@ fn test_delay() {
 
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg_attr(feature = "crate-isolation", ignore)]
 fn test_freq_and_count() {
     let f = || {
         fail_point!("freq_and_count", |s: Option<String>| s
@@ -193,6 +203,7 @@ fn test_freq_and_count() {
 
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg_attr(feature = "crate-isolation", ignore)]
 fn test_condition() {
     let f = |_enabled| {
         fail_point!("condition", _enabled, |_| 2);
@@ -213,4 +224,44 @@ fn test_list() {
     assert!(fail::list().contains(&("list".to_string(), "off".to_string())));
     fail::cfg("list", "return").unwrap();
     assert!(fail::list().contains(&("list".to_string(), "return".to_string())));
+}
+
+#[cfg(feature = "crate-isolation")]
+#[test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
+fn test_crate_isolation_return_parse() {
+    let f = || {
+        fail_point!("isolated_return_parse", |s: Option<String>| s
+            .map_or(2, |s| s.parse().unwrap()));
+        0
+    };
+    assert_eq!(f(), 0);
+
+    fail::cfg("isolated_return_parse", "return(1000)").unwrap();
+    assert_eq!(f(), 0);
+
+    fail::cfg("fail::isolated_return_parse", "return(1000)").unwrap();
+    assert_eq!(f(), 1000);
+
+    fail::cfg("fail::isolated_return_parse", "return").unwrap();
+    assert_eq!(f(), 2);
+}
+
+#[cfg(feature = "crate-isolation")]
+#[test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
+fn test_crate_isolation_return_default() {
+    let f = || {
+        fail_point!("isolated_return_default");
+        0
+    };
+    assert_eq!(f(), 0);
+
+    fail::cfg("isolated_return_default", "return(1000)").unwrap();
+    let result = std::panic::catch_unwind(f)
+        .expect("callback should not panic as fail point should not be set");
+    assert_eq!(result, 0);
+
+    fail::cfg("fail::isolated_return_default", "return(1000)").unwrap();
+    std::panic::catch_unwind(f).expect_err("callback should panic as fail point is set");
 }

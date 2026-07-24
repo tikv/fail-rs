@@ -4,6 +4,7 @@ use std::*;
 
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
+#[cfg_attr(feature = "crate-isolation", ignore)]
 fn test_return() {
     let f = || {
         fail::fail_point!("return", |s: Option<String>| s

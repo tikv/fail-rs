@@ -222,6 +222,16 @@
 //!  - Fail points might have the same name, in which case they take the
 //!    same actions. Be careful about duplicating fail point names, either within
 //!    a single crate, or across multiple crates.
+//!
+//! ### Crate isolation of fail points
+//!
+//! When the `crate-isolation` feature is enabled, any fail point name given
+//! will be prefixed with the name of the crate where the fail point is defined
+//! provided by Cargo's `CARGO_PKG_NAME` compile time environment variable.
+//!
+//! This feature should **not** be enabled outside `dev-dependencies` / test dependencies
+//! due to crate features being additive in nature.
+//!
 
 #![deny(missing_docs, missing_debug_implementations)]
 
@@ -667,6 +677,12 @@ pub fn eval<R, F: FnOnce(Option<String>) -> R>(name: &str, f: F) -> Option<R> {
 /// The `FAILPOINTS` environment variable accepts this same syntax for its fail
 /// point actions.
 ///
+/// ### Crate isolation of fail points
+///
+/// When the `crate-isolation` feature is enabled, any fail point name given
+/// will be prefixed with the name of the crate where the fail point is defined
+/// provided by Cargo's `CARGO_PKG_NAME` compile time environment variable.
+///
 /// A call to `cfg` with a particular fail point name overwrites any existing actions for
 /// that fail point, including those set via the `FAILPOINTS` environment variable.
 pub fn cfg<S: Into<String>>(name: S, actions: &str) -> Result<(), String> {
@@ -816,6 +832,22 @@ fn set(
 /// and`$e` must be a function or closure that accepts an `Option<String>` and
 /// returns the same type as the enclosing function.
 ///
+/// ### Automatic crate separation
+///
+/// When the `crate-isolation` feature is enabled, any fail point name given
+/// will be prefixed with the name of the crate where the fail point is defined
+/// provided by Cargo's `CARGO_PKG_NAME` compile time environment variable.
+///
+/// For example, if our crate name is `my-crate`, the following snippet will be
+/// only be triggered when targeting the `my-crate::fail-point-1` fail point:
+///
+/// ```rust
+/// # #[macro_use] extern crate fail;
+/// fn function_return_unit() {
+///     fail_point!("fail-point-1");
+/// }
+/// ```
+///
 /// For more examples see the [crate documentation](index.html). For more
 /// information about controlling fail points see the [`cfg`](fn.cfg.html)
 /// function.
@@ -823,12 +855,12 @@ fn set(
 #[cfg(feature = "failpoints")]
 macro_rules! fail_point {
     ($name:expr) => {{
-        $crate::eval($name, |_| {
+        $crate::eval($crate::fail_point_name!($name), |_| {
             panic!("Return is not supported for the fail point \"{}\"", $name);
         });
     }};
     ($name:expr, $e:expr) => {{
-        if let Some(res) = $crate::eval($name, $e) {
+        if let Some(res) = $crate::eval($crate::fail_point_name!($name), $e) {
             return res;
         }
     }};
@@ -846,6 +878,24 @@ macro_rules! fail_point {
     ($name:expr, $e:expr) => {{}};
     ($name:expr) => {{}};
     ($name:expr, $cond:expr, $e:expr) => {{}};
+}
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(all(feature = "failpoints", feature = "crate-isolation"))]
+macro_rules! fail_point_name {
+    ($name:expr) => {
+        concat!(env!("CARGO_PKG_NAME"), "::", $name)
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+#[cfg(all(feature = "failpoints", not(feature = "crate-isolation")))]
+macro_rules! fail_point_name {
+    ($name:expr) => {
+        $name
+    };
 }
 
 #[cfg(test)]
@@ -1032,6 +1082,7 @@ mod tests {
     // like `test_pause` maybe also affected, so it's better keep it here.
     #[test]
     #[cfg_attr(not(feature = "failpoints"), ignore)]
+    #[cfg_attr(feature = "crate-isolation", ignore)]
     fn test_setup_and_teardown() {
         let f1 = || {
             fail_point!("setup_and_teardown1", |_| 1);
