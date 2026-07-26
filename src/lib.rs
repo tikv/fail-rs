@@ -260,6 +260,34 @@ impl SyncCallback {
     }
 }
 
+#[derive(Clone)]
+struct SyncCallbackWithOutput(Arc<dyn Fn() -> Option<Option<String>> + Send + Sync>);
+
+impl Debug for SyncCallbackWithOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SyncCallbackWithOutput()")
+    }
+}
+
+impl PartialEq for SyncCallbackWithOutput {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl SyncCallbackWithOutput {
+    fn new(
+        f: impl Fn() -> Option<Option<String>> + Send + Sync + 'static,
+    ) -> SyncCallbackWithOutput {
+        SyncCallbackWithOutput(Arc::new(f))
+    }
+
+    fn run(&self) -> Option<Option<String>> {
+        let callback = &self.0;
+        callback()
+    }
+}
+
 /// Supported tasks.
 #[derive(Clone, Debug, PartialEq)]
 enum Task {
@@ -281,6 +309,8 @@ enum Task {
     Delay(u64),
     /// Call callback function.
     Callback(SyncCallback),
+    /// Call callback function, and pass output to the fail_point expression.
+    CallbackWithOutput(SyncCallbackWithOutput),
 }
 
 #[derive(Debug)]
@@ -317,6 +347,17 @@ impl Action {
 
     fn from_callback(f: impl Fn() + Send + Sync + 'static) -> Action {
         let task = Task::Callback(SyncCallback::new(f));
+        Action {
+            task,
+            freq: 1.0,
+            count: None,
+        }
+    }
+
+    fn from_callback_with_output(
+        f: impl Fn() -> Option<Option<String>> + Send + Sync + 'static,
+    ) -> Action {
+        let task = Task::CallbackWithOutput(SyncCallbackWithOutput::new(f));
         Action {
             task,
             freq: 1.0,
@@ -508,6 +549,7 @@ impl FailPoint {
             Task::Callback(f) => {
                 f.run();
             }
+            Task::CallbackWithOutput(f) => return f.run(),
         }
         None
     }
@@ -690,6 +732,28 @@ where
     let action = Action::from_callback(f);
     let actions = vec![action];
     p.set_actions("callback", actions);
+    Ok(())
+}
+
+/// Configure the actions for a fail point at runtime.
+///
+/// Each fail point can be configured by a callback. Process will call this callback function
+/// when it meet this fail-point.
+/// Its output will be used as the expression parameter for the `fail_point!` macro.
+///
+/// Refer to the `test_callback_with_output` test for more information.
+pub fn cfg_callback_with_output<S, F>(name: S, f: F) -> Result<(), String>
+where
+    S: Into<String>,
+    F: Fn() -> Option<Option<String>> + Send + Sync + 'static,
+{
+    let mut registry = REGISTRY.registry.write().unwrap();
+    let p = registry
+        .entry(name.into())
+        .or_insert_with(|| Arc::new(FailPoint::new()));
+    let action = Action::from_callback_with_output(f);
+    let actions = vec![action];
+    p.set_actions("callback_with_output", actions);
     Ok(())
 }
 

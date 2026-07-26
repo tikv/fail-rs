@@ -162,6 +162,70 @@ fn test_callback() {
 
 #[test]
 #[cfg_attr(not(feature = "failpoints"), ignore)]
+fn test_callback_with_output() {
+    let return_42 = || {
+        fail_point!("cb_with_output", |output_from_callback: Option<String>| {
+            if let Some(output) = output_from_callback {
+                let as_i32 = output.parse().expect("invalid integer");
+                // return the number that was passed
+                as_i32
+            } else {
+                // No output was passed by the callback,
+                // return an arbitrary number
+                84
+            }
+        });
+        // default function behavior
+        42
+    };
+
+    let counter = Arc::new(AtomicUsize::new(0));
+    let counter2 = counter.clone();
+
+    // We haven't set up the callback yet,
+    // the function will behave as usual
+    assert_eq!(42, return_42());
+
+    // Configure the callback to return the counter,
+    // Only if counter can be divided by two
+    fail::cfg_callback_with_output("cb_with_output", move || {
+        let prev = counter2.fetch_add(1, Ordering::SeqCst);
+
+        if prev == 0 {
+            // First call, we decide to not return anything
+            return None;
+        }
+
+        if prev % 2 == 0 {
+            Some(Some(prev.to_string()))
+        } else {
+            Some(None)
+        }
+    })
+    .unwrap();
+
+    // Fist call via the callback,
+    // The callback must have passed `None`
+    // to the fail point,
+    // Thus not triggering it.
+    assert_eq!(42, return_42());
+    // Second call via the callback,
+    // which returned Some(None)
+    // We entered the "arbitrary number" branch
+    assert_eq!(84, return_42());
+    // Third call via the callback,
+    // which returned Some(Some("2".to_string()))
+    // We entered the "return passed number" branch
+    assert_eq!(2, return_42());
+
+    // The callback has always been called,
+    // it was responsible for determining the parameter
+    // passed to the failpoint
+    assert_eq!(3, counter.load(Ordering::SeqCst));
+}
+
+#[test]
+#[cfg_attr(not(feature = "failpoints"), ignore)]
 fn test_delay() {
     let f = || fail_point!("delay");
     let timer = Instant::now();
